@@ -1,0 +1,44 @@
+# Argus_AI/model/train_config.yaml
+
+model: yolov10n.pt          # .pt not .yaml — downloads pretrained weights automatically
+
+data: D:\ArgusAI\Argus_AI\data\dataset.yaml   # your absolute Windows path
+
+epochs: 50                  # good for POC with 40k images
+
+batch: 16                   # start here — reduce to 8 if you get CUDA out of memory
+
+imgsz: 640                  # standard input size
+
+device: 0                   # use 0 if AMD/NVIDIA GPU available — use 'cpu' if no GPU
+
+workers: 4                  # Windows works best at 4 — Linux can go higher
+
+lr0: 0.01                   # initial learning rate — default is fine
+
+lrf: 0.01                   # final LR factor
+
+momentum: 0.937
+
+weight_decay: 0.0005
+
+warmup_epochs: 3            # gentle start for 3 epochs before full learning rate
+
+amp: true                   # automatic mixed precision — faster training, less memory
+
+save: true
+
+save_period: 10             # save checkpoint every 10 epochs
+
+project: Argus_AI/model/runs
+
+name: argus_ai_v1
+
+patience: 20                # stop early if no improvement for 20 epochs
+
+# ── Class weights (important for your imbalanced dataset) ──────────────────
+# Pothole is your most critical class — slight boost helps detection
+# These are applied during loss calculation
+cls: 0.5                    # classification loss weight
+box: 7.5                    # bounding box loss weight — higher = more precise boxes
+dfl: 1.5                    # distribution focal loss weight
