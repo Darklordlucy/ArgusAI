@@ -25,7 +25,7 @@ India records **1.78 lakh road deaths annually**. 44% are two-wheeler riders —
 
 ## 💡 What is ArgusAI?
 
-ArgusAI is a **₹4,604 edge-AI device** that mounts on any two-wheeler and runs entirely offline.
+ArgusAI is a **₹6,000 edge-AI device** that mounts on any two-wheeler and runs entirely offline.
 
 | Capability | Detail |
 |---|---|
@@ -66,23 +66,6 @@ ArgusAI is a **₹4,604 edge-AI device** that mounts on any two-wheeler and runs
 │                        Re-arm      GPS SMS Sent             │
 └─────────────────────────────────────────────────────────────┘
 ```
-
----
-
-## 🔧 Hardware Components
-
-| Component | Purpose | Cost |
-|---|---|---|
-| Raspberry Pi 4 | Edge AI inference — 15-20 FPS on YOLOv10n | Rs. 4,500 |
-| Pi Camera Module v1.3 | 30 FPS road capture at 640×640 | Rs. 500 |
-| MPU6050 IMU | 6-axis crash detection at 50Hz | Rs. 150 |
-| NEO-6M GPS | 2.5m accurate location for SOS dispatch | Rs. 550 |
-| SIM800L GSM | Quad-band 2G SMS — any Indian network | Rs. 500 |
-| Power System | 18650 battery pack — 3-5 hour runtime | Rs. 506 |
-| Enclosure + PCB | ABS box + perfboard | Rs. 380 |
-| **Total** | | **Rs. 4,604** |
-
----
 
 ## 🤖 AI Model
 
