@@ -45,22 +45,22 @@ ArgusAI is a **₹4,604 edge-AI device** that mounts on any two-wheeler and runs
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    POWER ON                                  │
-│                        ↓                                     │
+│                    POWER ON                                 │
+│                        ↓                                    │
 │          Hardware Init (Camera + GPS + IMU + GSM)           │
-│                        ↓                                     │
-│          Load AI Model + Emergency Contacts                  │
-│              ↙                        ↘                      │
+│                        ↓                                    │
+│          Load AI Model + Emergency Contacts                 │
+│              ↙                        ↘                    │
 │    DETECTION LOOP (5 FPS)      CRASH LOOP (50Hz)            │
-│         ↓                            ↓                       │
+│         ↓                            ↓                      │
 │  Camera Captures Frame        IMU Detects Impact            │
-│         ↓                            ↓                       │
+│         ↓                            ↓                      │
 │  AI Identifies Hazard         Speed Drop Confirmed          │
-│         ↓                            ↓                       │
+│         ↓                            ↓                      │
 │   Buzzer Alert                 CRASH CONFIRMED              │
 │  (1/2/3 beeps)                       ↓                      │
 │                            15s Cancel Window                │
-│                           ↙            ↘                    │
+│                           ↙            ↘                   │
 │                      CANCELLED      NO RESPONSE             │
 │                           ↓            ↓                    │
 │                        Re-arm      GPS SMS Sent             │
@@ -108,22 +108,6 @@ ArgusAI is a **₹4,604 edge-AI device** that mounts on any two-wheeler and runs
 
 ### Dataset Augmentations
 Rain overlay · Fog/haze · Night brightness (45-65%) · Motion blur · Horizontal flip · Mosaic
-
----
-
-## ⚡ AMD Benchmark Results
-
-> ArgusAI is engineered around the AMD ecosystem — from edge inference to cloud retraining.
-
-| Hardware | FPS | Latency | Source |
-|---|---|---|---|
-| **AMD Radeon 780M (DirectML)** | **260.94 FPS** | **3.83ms** | ✅ Tested |
-| Intel UHD (DirectML) | 52.31 FPS | 19.12ms | ✅ Tested |
-| Intel i5 13th Gen (CPU) | 34.96 FPS | 28.60ms | ✅ Tested |
-| AMD Ryzen 7 8250 (CPU) | 19.27 FPS | 51.89ms | ✅ Tested |
-| Raspberry Pi 4 (CPU) | 7.5 FPS | 133ms | Seeed Studio 2023 |
-
-**AMD Radeon 780M is 5× faster than Intel UHD on integrated GPU — at zero additional hardware cost.**
 
 ---
 
@@ -269,7 +253,7 @@ ArgusAI/
 
 | Member | Role | LinkedIn |
 |---|---|---|
-| K Sai Ullash Reddy | AI & Backend Lead — YOLOv10n training, ONNX export, inference pipeline, FastAPI, AMD benchmark | [LinkedIn](https://www.linkedin.com/in/uallasreddy) |
+| K Sai Uallash Reddy | AI & Backend Lead — YOLOv10n training, ONNX export, inference pipeline, FastAPI, AMD benchmark | [LinkedIn](https://www.linkedin.com/in/uallasreddy) |
 | Saideep Paladi | Hardware & Embedded Lead — Circuit design, MPU6050, GPS, SIM800L, GPIO/I2C/UART | [LinkedIn](https://www.linkedin.com/in/saideep-paladi) |
 | Umang Pawar | Data & Backend Engineer — 40,715 image dataset, augmentation pipeline, FastAPI, SQL | [LinkedIn](https://www.linkedin.com/in/umangpawar) |
 
