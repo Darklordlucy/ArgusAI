@@ -41,32 +41,6 @@ ArgusAI is a **₹6,000 edge-AI device** that mounts on any two-wheeler and runs
 
 ---
 
-## 🏗️ System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    POWER ON                                 │
-│                        ↓                                    │
-│          Hardware Init (Camera + GPS + IMU + GSM)           │
-│                        ↓                                    │
-│          Load AI Model + Emergency Contacts                 │
-│              ↙                        ↘                    │
-│    DETECTION LOOP (5 FPS)      CRASH LOOP (50Hz)            │
-│         ↓                            ↓                      │
-│  Camera Captures Frame        IMU Detects Impact            │
-│         ↓                            ↓                      │
-│  AI Identifies Hazard         Speed Drop Confirmed          │
-│         ↓                            ↓                      │
-│   Buzzer Alert                 CRASH CONFIRMED              │
-│  (1/2/3 beeps)                       ↓                      │
-│                            15s Cancel Window                │
-│                           ↙            ↘                   │
-│                      CANCELLED      NO RESPONSE             │
-│                           ↓            ↓                    │
-│                        Re-arm      GPS SMS Sent             │
-└─────────────────────────────────────────────────────────────┘
-```
-
 ## 🤖 AI Model
 
 | Parameter | Value |
