@@ -216,7 +216,7 @@ ArgusAI/
 
 ---
 
-## 🏆 AMD Slingshot Hackathon 2024
+## 🏆 AMD Slingshot Hackathon 2026
 
 This project was built for the AMD Slingshot Hackathon.
 
