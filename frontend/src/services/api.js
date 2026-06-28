@@ -91,6 +91,16 @@ export async function computeRoute({
   });
 }
 
+/**
+ * Submit route feedback to backend database.
+ */
+export async function submitRouteFeedback(payload) {
+  return request('/api/v1/routes/feedback', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 // ─── Health ──────────────────────────────────────────────────────────────────
 
 export async function checkHealth() {

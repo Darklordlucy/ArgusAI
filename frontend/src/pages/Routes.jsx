@@ -5,7 +5,7 @@ import {
   MapPin, Navigation, Zap, Shield, ArrowRight, Star,
   Bike, Car, Truck, Rocket, Play, Activity, Loader2, AlertTriangle, X
 } from 'lucide-react';
-import { computeRoute } from '../services/api';
+import { computeRoute, submitRouteFeedback } from '../services/api';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
 
@@ -25,6 +25,64 @@ async function geocodeSearch(query) {
     return [];
   }
 }
+
+const FEEDBACK_QUESTIONS = [
+  {
+    id: 'accuracy',
+    question: 'How accurate were the potholes and road hazard warnings?',
+    options: [
+      { value: 5, label: 'Extremely accurate (warned in advance for everything)' },
+      { value: 4, label: 'Mostly accurate (missed 1 or 2 minor spots)' },
+      { value: 3, label: 'Moderately accurate (missed some major hazards)' },
+      { value: 2, label: 'Warned too late / delayed alerts' },
+      { value: 1, label: 'Completely inaccurate / no alerts for hazards' }
+    ]
+  },
+  {
+    id: 'comfort',
+    question: 'How would you rate the ride comfort and vibration levels?',
+    options: [
+      { value: 5, label: 'Very comfortable (smooth surface, minimal vibration)' },
+      { value: 4, label: 'Comfortable (minor/manageable bumps)' },
+      { value: 3, label: 'Rough (moderate vibrations from uneven paving)' },
+      { value: 2, label: 'Uncomfortable (excessive shaking from road wear)' },
+      { value: 1, label: 'Severe (high vibration/vehicle damage risk)' }
+    ]
+  },
+  {
+    id: 'unmapped_hazards',
+    question: 'Did you encounter any unmapped potholes/hazards?',
+    options: [
+      { value: 5, label: 'No unmapped hazards encountered' },
+      { value: 4, label: 'Encountered 1-2 minor unmapped issues' },
+      { value: 3, label: 'Encountered a cluster of unmapped potholes' },
+      { value: 2, label: 'Encountered major severe craters not on map' },
+      { value: 1, label: 'Deteriorated road section without warning' }
+    ]
+  },
+  {
+    id: 'efficiency',
+    question: 'How efficient was the route in terms of time and traffic?',
+    options: [
+      { value: 5, label: 'Much faster and cleaner than expected' },
+      { value: 4, label: 'As expected (met the predicted duration)' },
+      { value: 3, label: 'Slightly slower (minor congestion/delays)' },
+      { value: 2, label: 'Significantly delayed / stuck in bottlenecks' },
+      { value: 1, label: 'Extremely inefficient route path' }
+    ]
+  },
+  {
+    id: 'recommendation',
+    question: 'Would you recommend this route to other drivers?',
+    options: [
+      { value: 5, label: 'Yes, highly recommended (5 stars)' },
+      { value: 4, label: 'Yes, with standard caution (4 stars)' },
+      { value: 3, label: 'Neutral (3 stars)' },
+      { value: 2, label: 'No, only as a last resort (2 stars)' },
+      { value: 1, label: 'No, completely avoid (1 star)' }
+    ]
+  }
+];
 
 const Routes = () => {
   // ── Search state ────────────────────────────────────────────────────────
@@ -47,6 +105,12 @@ const Routes = () => {
   const [loading,       setLoading]       = useState(false);
   const [isNavigating,  setIsNavigating]  = useState(false);
   const [isFlipped,     setIsFlipped]     = useState(false);
+
+  // ── RLHF Feedback & MCQ states ───────────────────────────────────────────
+  const [showFeedback,      setShowFeedback]      = useState(false);
+  const [showRLHFInfo,      setShowRLHFInfo]      = useState(false);
+  const [feedbackAnswers,   setFeedbackAnswers]   = useState({});
+  const [submittingFeedback, setSubmittingFeedback] = useState(false);
 
   // ── Refs ─────────────────────────────────────────────────────────────────
   const originRef      = useRef(null);
@@ -184,6 +248,50 @@ const Routes = () => {
     window.open(gmapsUrl, '_blank');
     setIsNavigating(true);
   }, [routeResult, vehicle]);
+
+  // ── Submit Feedback to Backend ─────────────────────────────────────────────
+  const handleFeedbackSubmit = useCallback(async (e) => {
+    if (e) e.preventDefault();
+    
+    const unanswered = FEEDBACK_QUESTIONS.filter(q => !feedbackAnswers[q.id]);
+    if (unanswered.length > 0) {
+      alert("Please answer all 5 questions before submitting.");
+      return;
+    }
+    
+    setSubmittingFeedback(true);
+    try {
+      const rating = Number(feedbackAnswers['recommendation']) || 3;
+      
+      const answersText = FEEDBACK_QUESTIONS.map((q, idx) => {
+        const selectedValue = feedbackAnswers[q.id];
+        const selectedOption = q.options.find(o => o.value === Number(selectedValue));
+        return `${idx + 1}. ${q.question}\n   Answer: [Score ${selectedValue}] ${selectedOption ? selectedOption.label : 'N/A'}`;
+      }).join('\n\n');
+      
+      const coords = routeResult.geometry.coordinates;
+      
+      const payload = {
+        user_id: "human_pilot",
+        start_point: { lat: coords[0][1], lon: coords[0][0] },
+        end_point: { lat: coords[coords.length - 1][1], lon: coords[coords.length - 1][0] },
+        route_geometry: coords,
+        route_type: routeType,
+        rating: rating,
+        feedback_text: answersText
+      };
+      
+      await submitRouteFeedback(payload);
+      
+      setShowRLHFInfo(true);
+      setShowFeedback(false);
+    } catch (err) {
+      console.error("Error submitting feedback:", err);
+      alert("Could not submit feedback to database: " + err.message);
+    } finally {
+      setSubmittingFeedback(false);
+    }
+  }, [routeResult, routeType, feedbackAnswers]);
 
   // ── GeoJSON for the route line ────────────────────────────────────────────
   const routeGeoJSON = routeResult
@@ -599,7 +707,10 @@ const Routes = () => {
             </div>
 
             <button
-              onClick={() => setIsNavigating(false)}
+              onClick={() => {
+                setShowFeedback(true);
+                setFeedbackAnswers({});
+              }}
               className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3 rounded-xl transition-colors"
             >
               End Navigation
@@ -607,6 +718,141 @@ const Routes = () => {
           </div>
         )}
       </div>
+
+      {/* ── Feedback & RLHF Modals ────────────────────────────────────────── */}
+      {showFeedback && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
+          <div className="bg-[#8F9D68] border border-black/15 max-w-xl w-full p-8 rounded-3xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.4)] flex flex-col max-h-[90vh] text-black animate-in fade-in zoom-in-95 duration-200">
+            {/* Title */}
+            <div className="mb-4 shrink-0 flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-black tracking-tight text-black">Navigation Feedback</h2>
+                <p className="text-xs text-black/60 font-semibold uppercase tracking-wider mt-1">Help optimize future routing metrics</p>
+              </div>
+              <button 
+                onClick={() => { setShowFeedback(false); }}
+                className="w-8 h-8 rounded-full bg-[#fef6d2] flex items-center justify-center border border-black/10 hover:bg-black hover:text-[#fef6d2] transition-all"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Form Content */}
+            <div className="flex-1 overflow-y-auto pr-2 space-y-6 scrollbar-none" style={{ scrollbarWidth: 'none' }}>
+              {FEEDBACK_QUESTIONS.map((q) => (
+                <div key={q.id} className="bg-[#fef6d2]/40 p-5 rounded-2xl border border-black/5 space-y-3">
+                  <h3 className="font-bold text-sm leading-snug">{q.question}</h3>
+                  <div className="space-y-2">
+                    {q.options.map((opt) => {
+                      const isSelected = feedbackAnswers[q.id] === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setFeedbackAnswers(prev => ({ ...prev, [q.id]: opt.value }))}
+                          className={`w-full text-left p-3.5 rounded-xl border text-xs font-semibold flex items-center gap-3 transition-all duration-200 ${
+                            isSelected
+                              ? 'bg-black text-[#fef6d2] border-black shadow-md scale-[1.01]'
+                              : 'bg-[#fef6d2]/50 text-black/85 border-black/5 hover:bg-[#fef6d2]/85'
+                          }`}
+                        >
+                          <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                            isSelected ? 'border-brand-yellow bg-brand-yellow' : 'border-black/30'
+                          }`}>
+                            {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-black" />}
+                          </div>
+                          <span>{opt.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Footer Submit */}
+            <div className="mt-6 pt-4 border-t border-black/10 shrink-0">
+              <button
+                type="button"
+                onClick={handleFeedbackSubmit}
+                disabled={submittingFeedback || FEEDBACK_QUESTIONS.some(q => !feedbackAnswers[q.id])}
+                className={`w-full py-4 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all duration-300 shadow-lg ${
+                  !FEEDBACK_QUESTIONS.some(q => !feedbackAnswers[q.id]) && !submittingFeedback
+                    ? 'bg-black text-[#fef6d2] hover:bg-black/80 hover:shadow-xl hover:-translate-y-0.5'
+                    : 'bg-black/10 text-black/30 cursor-not-allowed shadow-none'
+                }`}
+              >
+                {submittingFeedback ? (
+                  <><Loader2 size={18} className="animate-spin" /> Saving to Database...</>
+                ) : (
+                  <><Play size={18} className="fill-[#fef6d2]" /> Submit & Calculate Rewards</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRLHFInfo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md p-4">
+          <div className="bg-[#8F9D68] border border-black/15 max-w-xl w-full p-8 rounded-3xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.4)] flex flex-col text-black animate-in fade-in zoom-in-95 duration-200">
+            {/* Title */}
+            <div className="mb-4 shrink-0 flex items-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-black flex items-center justify-center text-brand-yellow animate-pulse shrink-0">
+                <Activity size={24} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black tracking-tight text-black">RLHF Ingestion Loop</h2>
+                <p className="text-xs text-black/60 font-semibold uppercase tracking-wider mt-0.5">Reinforcement Learning from Human Feedback</p>
+              </div>
+            </div>
+
+            {/* Explanation Text */}
+            <div className="bg-[#fef6d2]/50 p-6 rounded-2xl border border-black/5 space-y-4 my-4 overflow-y-auto max-h-[50vh] text-sm leading-relaxed scrollbar-none" style={{ scrollbarWidth: 'none' }}>
+              <p className="font-bold text-black text-base">
+                How your feedback updates our neural spatial graph:
+              </p>
+              
+              <div className="border-l-4 border-black pl-3 space-y-2 text-xs font-semibold text-black/80">
+                <p>
+                  1. <strong>Reward Signals:</strong> The ratings and hazard accuracy answers you submitted are treated as environment state evaluations (S_t).
+                </p>
+                <p>
+                  2. <strong>Objective Weight Retuning:</strong> If you reported higher vibrations or unmapped craters, a negative reward multiplier (R) is applied to those specific road segment IDs.
+                </p>
+                <p>
+                  3. <strong>Policy Optimizations:</strong> The GraphManager utilizes these RLHF reward matrices to penalize the safest-path calculation formulas (W_safest) for these segments.
+                </p>
+                <p>
+                  4. <strong>Global Model Synchronization:</strong> During the next background job sync, these human-labeled coordinates refine our gradient boosting hazard predictions.
+                </p>
+              </div>
+
+              <p className="text-xs font-medium text-black/75">
+                By utilizing your actual road feedback instead of relying solely on sparse TomTom traffic sensors or satellite telemetry, Asphr establishes a closed-loop human-in-the-loop navigation network. Future route calculations will actively route other drivers away from segments with bad ride ratings.
+              </p>
+
+              <div className="bg-black/5 p-3.5 rounded-xl border border-black/5 flex items-center gap-3">
+                <Shield className="text-black shrink-0" size={18} />
+                <span className="text-[11px] font-bold text-black/85 leading-snug">
+                  Feedback successfully logged under user pilot: <span className="font-mono bg-black text-[#fef6d2] px-1.5 py-0.5 rounded text-[10px]">human_pilot</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Button */}
+            <button
+              onClick={() => {
+                setIsNavigating(false);
+                setShowRLHFInfo(false);
+              }}
+              className="w-full py-4 rounded-2xl bg-black text-[#fef6d2] font-black text-sm flex items-center justify-center gap-2 hover:bg-black/80 transition-colors shadow-lg active:scale-[0.98]"
+            >
+              Finish & Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
