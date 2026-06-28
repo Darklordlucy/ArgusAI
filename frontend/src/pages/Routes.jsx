@@ -151,6 +151,40 @@ const Routes = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routeType, vehicle]);
 
+  // ── Start Navigation / Redirect to Google Maps ─────────────────────────────
+  const handleStartNavigation = useCallback(() => {
+    if (!routeResult || !routeResult.geometry || !routeResult.geometry.coordinates) return;
+    
+    const coords = routeResult.geometry.coordinates;
+    if (coords.length === 0) return;
+    
+    // Coordinates are in [lon, lat] format for GeoJSON. Google Maps expects lat,lon.
+    const origin = `${coords[0][1]},${coords[0][0]}`;
+    const destination = `${coords[coords.length - 1][1]},${coords[coords.length - 1][0]}`;
+    
+    // Sample up to 10 intermediate waypoints to trace the same route shape
+    const waypoints = [];
+    if (coords.length > 2) {
+      const maxWaypoints = 10;
+      const step = Math.ceil((coords.length - 2) / (maxWaypoints + 1));
+      for (let i = step; i < coords.length - 1; i += step) {
+        if (i < coords.length - 1) {
+          waypoints.push(`${coords[i][1]},${coords[i][0]}`);
+        }
+      }
+    }
+    
+    const travelMode = vehicle === 'bike' ? 'bicycling' : 'driving';
+    let gmapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=${travelMode}`;
+    
+    if (waypoints.length > 0) {
+      gmapsUrl += `&waypoints=${encodeURIComponent(waypoints.join('|'))}`;
+    }
+    
+    window.open(gmapsUrl, '_blank');
+    setIsNavigating(true);
+  }, [routeResult, vehicle]);
+
   // ── GeoJSON for the route line ────────────────────────────────────────────
   const routeGeoJSON = routeResult
     ? {
@@ -447,7 +481,7 @@ const Routes = () => {
 
                 {/* ── Start Navigation Button ───────────────────────────────── */}
                 <button
-                  onClick={() => { if (routeResult) setIsNavigating(true); }}
+                  onClick={handleStartNavigation}
                   disabled={!routeResult || loading}
                   className={`w-full mt-4 py-4 rounded-2xl flex items-center justify-center gap-2 transition-all duration-300 font-bold shrink-0
                     ${routeResult && !loading

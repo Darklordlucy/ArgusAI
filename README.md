@@ -1,112 +1,482 @@
-# Asphr Ecosystem — Strategic Build Guide
-*A Scale.ai-style execution playbook for hackathon dominance*
+# Asphr Ecosystem — System Architecture & Engineering Guide
+
+This document provides a comprehensive, production-grade guide to the **Asphr** system architecture. It outlines the technology stack, software layers, data pipelines, neural network components, database models, algorithms, and communication protocols.
 
 ---
 
-## Executive Summary (Alexander's Lens)
+## 1. System Topology & Architectural Flow
 
-Your hardware is a **data moat** — the IoT sensors create proprietary ground-truth that no Google Maps competitor can replicate. The software challenge is **orchestration**: turning raw sensor streams into differentiable routing intelligence without LLM APIs. 
+The diagram below illustrates how telemetry streams, user requests, background polling, and ML inference interact across the client, API gateway, spatial graph engine, and database layer.
 
-**Core thesis**: Build a *multi-objective graph optimization engine* where edge weights are dynamically recomputed by ensemble ML models fed by your IoT fleet + public APIs. The "safest vs fastest vs straightest" is not three apps — it's one engine with tunable objective functions.
+```mermaid
+graph TD
+    %% Clients
+    subgraph Clients ["Client Layer"]
+        FE["React Web UI (Mapbox GL JS)"]
+        IoT["IoT Telemetry Fleet (GPS, Gyro, Accel)"]
+    end
 
-**Hackathon constraint**: Ship a working vertical slice (one city, 3 route types, live IoT plotting) rather than a perfect horizontal platform.
+    %% Gateway & REST API
+    subgraph APILayer ["FastAPI API Gateway & Orchestrator"]
+        WS["ASGI WebSocket Server"]
+        HTTP["REST API Routers"]
+        BG["FastAPI Background Tasks"]
+    end
 
----
+    %% Services & Engines
+    subgraph EngineLayer ["Core Processing & Inference Engines"]
+        RM["GraphManager (OSMnx / NetworkX)"]
+        RO["RouteOptimizer (Pathfinding Engine)"]
+        HP["HazardPredictor (Scikit-Learn Ensemble)"]
+        TF["TrafficForecaster (PyTorch LSTM Neural Network)"]
+    end
 
-## Phase 0: Project Repository Architecture
+    %% Database & External APIs
+    subgraph DataLayer ["Data & Storage Layer"]
+        DB[(Supabase PostgreSQL + PostGIS)]
+        ExtAPIs["External APIs (TomTom, OpenWeather, OSM)"]
+    end
 
-Create a monorepo with clear separation of concerns for Railway + Vercel deployability.
+    %% Background Jobs
+    subgraph BackgroundJobs ["Background Scheduler (APScheduler)"]
+        SCH["APScheduler Thread"]
+    end
 
-```
-Asphr/
-├── backend/                          # Python/FastAPI → Railway
-│   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py                   # FastAPI entry point
-│   │   ├── config.py                 # Environment variables
-│   │   ├── models/                   # ML model definitions (PyTorch)
-│   │   │   ├── __init__.py
-│   │   │   ├── hazard_predictor.py   # Predicts road hazard scores
-│   │   │   ├── route_optimizer.py    # Multi-objective pathfinding
-│   │   │   └── traffic_forecaster.py # LSTM for traffic prediction
-│   │   ├── algorithms/               # Core graph algorithms
-│   │   │   ├── __init__.py
-│   │   │   ├── graph_builder.py      # OSM → NetworkX graph
-│   │   │   ├── dijkstra_variant.py   # Weighted shortest path
-│   │   │   └── a_star_custom.py      # A* with dynamic heuristics
-│   │   ├── services/                 # Business logic layer
-│   │   │   ├── __init__.py
-│   │   │   ├── route_service.py      # Route computation orchestrator
-│   │   │   ├── geocoding_service.py  # Forward/reverse geocoding
-│   │   │   ├── iot_service.py        # Hardware data ingestion
-│   │   │   └── weather_service.py    # Weather API aggregation
-│   │   ├── routers/                  # FastAPI route handlers
-│   │   │   ├── __init__.py
-│   │   │   ├── routes.py             # /api/v1/routes/*
-│   │   │   ├── geocode.py            # /api/v1/geocode/*
-│   │   │   ├── iot.py                # /api/v1/iot/*
-│   │   │   └── health.py             # /health
-│   │   ├── schemas/                  # Pydantic models
-│   │   │   ├── __init__.py
-│   │   │   ├── route_schemas.py
-│   │   │   └── iot_schemas.py
-│   │   └── utils/
-│   │       ├── __init__.py
-│   │       └── geo_utils.py          # Haversine, coordinate transforms
-│   ├── alembic/                      # Database migrations
-│   ├── tests/
-│   ├── requirements.txt
-│   ├── Dockerfile                    # For Railway deployment
-│   └── railway.toml                  # Railway config
-│
-├── frontend/                         # React/JavaScript → Vercel
-│   ├── public/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── Map/                  # Mapbox GL JS wrapper
-│   │   │   ├── RoutePanel/           # Route selection UI
-│   │   │   ├── RouteTypes/           # Fastest/Safest/Straightest/Popular
-│   │   │   ├── VehicleSelector/      # Bike/Car/Truck/Supercar
-│   │   │   ├── IoTOverlay/           # Real-time sensor heatmap
-│   │   │   └── SearchBar/            # Location search
-│   │   ├── pages/
-│   │   │   ├── Home.jsx              # Main map + routing interface
-│   │   │   ├── RouteDetail.jsx       # Turn-by-turn + elevation/weather
-│   │   │   └── Analytics.jsx         # IoT data dashboard (bonus)
-│   │   ├── hooks/
-│   │   │   ├── useMapbox.js
-│   │   │   └── useRoutes.js          # React Query for backend calls
-│   │   ├── services/
-│   │   │   └── api.js                # Axios instance to FastAPI
-│   │   ├── store/                    # Zustand state management
-│   │   ├── App.jsx
-│   │   └── index.js
-│   ├── package.json
-│   ├── vercel.json
-│   └── .env.example
-│
-├── ml-training/                      # Jupyter notebooks (local only)
-│   ├── notebooks/
-│   ├── datasets/
-│   └── models/                       # Exported .pt / .pkl files
-│
-├── infra/
-│   └── supabase/
-│       └── migrations/               # SQL table definitions
-│
-└── README.md
+    %% Interactions
+    FE <-->|WebSockets: Pings, Hazards, Live Alerts| WS
+    FE -->|HTTP: Geocode, Routes, Feedback| HTTP
+    IoT -->|HTTP Ingest Payload| HTTP
+    HTTP -->|Trigger Background Save| BG
+    BG -->|Async Write / Commit| DB
+    
+    %% In-Memory Graph and Engines
+    RM -->|Maintains In-Memory MultiDiGraph| RO
+    RO -->|Snaps Coordinates via KD-Tree| RM
+    RO -->|Inference Query| HP
+    RO -->|Inference Query| TF
+    
+    %% Scheduler updates
+    SCH -->|Trigger Weather Grid Refresher| ExtAPIs
+    SCH -->|Trigger Graph Weight Enrichment| DB
+    SCH -->|Remove TTL Expired Hazards| DB
+    ExtAPIs -->|Write Weather / Traffic Data| DB
+    DB -->|Query Segments, Hazards, Weather, IoT| RM
+    
+    %% Path Computation
+    HTTP -->|Invokes RouteService| RO
+    RO -->|Returns GeoJSON & turn-by-turn path| HTTP
 ```
 
 ---
 
-## Phase 1: Database Schema (Supabase/PostgreSQL + PostGIS)
+## 2. Technology Stack & Development Tooling
 
-**Step 1.1**: Enable PostGIS extension in Supabase dashboard (Database → Extensions → PostGIS).
+| Component | Framework / Library / API | Role |
+| :--- | :--- | :--- |
+| **Frontend Core** | React (Vite-based SPA) | Client-side user interface rendering |
+| **Map Rendering** | Mapbox GL JS | Interactive vector maps, route coordinates plotting, hazard heatmaps |
+| **State Management** | Zustand | Client state container (origin, destination, routes, alerts) |
+| **API Client** | Axios & React Query | Asynchronous backend endpoints fetching, polling, caching |
+| **Backend Gateway** | FastAPI (Python) | High-performance ASGI web server & API router orchestration |
+| **Server Engine** | Uvicorn | High-performance ASGI server implementation |
+| **Routing Graph** | NetworkX | In-memory graph network structures manipulation |
+| **OSM Downloader** | OSMnx | OpenStreetMap road network geometry querying, simplification, and caching |
+| **ML Inference (DL)** | PyTorch (`torch`) | Neural Network speed forecaster loading and inference execution |
+| **ML Inference (ML)** | Scikit-Learn (`joblib`) | Gradient Boosting segment hazard predictor loading and evaluation |
+| **Spatial Math** | Shapely | Coordinate parsing, LineString bounding boxes, geometries |
+| **Database System** | Supabase (PostgreSQL) | Primary relational database storage |
+| **Spatial Database** | PostGIS Extension | Spatial geometry columns, R-Tree indexes, distance/intersection functions |
+| **Database ORM** | SQLAlchemy & GeoAlchemy2 | Async object-relational mapping, PostgreSQL geometry types support |
+| **Cron Scheduling** | APScheduler | Multi-threaded interval background jobs processing |
+| **External Integrations**| TomTom Traffic Flow API | Real-time traffic segment congestion and speeds data retrieval |
+| **External Weather** | OpenWeatherMap / Open-Meteo | Meteorological data points for visibility, precipitation, storm warnings |
+| **Geocoding API** | Mapbox Geocoding & Nominatim | Forward (places to coordinates) and Reverse geocoding with rate-limits |
 
-**Step 1.2**: Execute these table creation queries in Supabase SQL Editor:
+---
+
+## 3. Layered Software Architecture
+
+### 3.1. Frontend User Interface Layer
+The UI consists of an interactive SPA mapping suite built with React:
+* **Interactive Map Visualization**: Handles layers for route paths (`LineString`), real-time vehicle simulation (moving marker), and pothole/hazard overlay heatmaps (`geojson` layers).
+* **Location Input**: Features debounced (300ms) geocoding search bars that query address suggestions using the backend geocoder.
+* **Objective Selector**: Enables toggle switches between routing options: **Fastest**, **Safest**, **Straightest**, and **Popular**.
+* **Vehicle Selector**: Updates the query constraints depending on whether the user selects a **Car**, **Bike**, **Truck**, or **Supercar**.
+* **WebSockets Integration**: Listens continuously for server broadcasts notifying updates to weather grids, updated hazard events, and graph modifications.
+
+### 3.2. API / Orchestration Layer
+FastAPI provides asynchronous, schema-validated route handlers:
+* **Lifespan Manager**: On startup, spawns asynchronous tasks to load ML models, download/simplify graph datasets for the Mumbai Metropolitan Area (MMR), run database synchronization, and boot the interval scheduler.
+* **REST API Endpoints**: Formulates responses for route execution, forward/reverse geocoding, database coordinate fetches (popular places, weather grids), and TomTom traffic incidents.
+* **WebSockets Endpoints**: Establishes persistent connection pools for real-time bi-directional telemetry exchange.
+* **Background Executions**: Employs non-blocking background executors for write-heavy jobs (e.g. logging user routing feedback) to prevent endpoint latency.
+
+### 3.3. Spatial Routing & Optimization Layer
+Translates geographic coordinate inputs into traversable pathways:
+* **Graph Management**: Holds an in-memory `MultiDiGraph` containing OpenStreetMap nodes and road edges, caching it as a `.graphml` file to avoid repeated remote API requests.
+* **Snapping**: Snaps client origin/destination coordinates to the nearest network node using KD-Tree spatial lookups.
+* **Subgraph Filtering**: Dynamically restricts the routing subgraph based on vehicle profile safety and width limitations (e.g., trucks avoiding narrow paths, supercars avoiding speed bumps, bikes avoiding motorways).
+* **Pathfinders**: Evaluates shortest path networks using Dijkstra and customized A* search heuristics.
+
+### 3.4. Machine Learning & Neural Network Layer
+Contains model definitions and inference execution pipelines:
+* **Deep Learning Traffic Forecaster**: Spawns inference tasks predicting road speed offsets 30 minutes in the future.
+* **Shallow ML Hazard Predictor**: Combines structural road attributes with real-time dynamic inputs to output a danger probability score in the interval $[0.0, 1.0]$.
+
+### 3.5. Spatial Database Layer
+Maintains structural, transactional, and telematic state:
+* **PostgreSQL + PostGIS**: Utilizes spatial database indices (`GIST`) to execute highly optimized geographic queries (e.g., matching point coordinates with road segments, bounding-box queries).
+* **SQLAlchemy & GeoAlchemy2**: maps relational datasets into Python classes. Employs asynchronous session pools (`AsyncSession`) to ensure non-blocking database transactions.
+
+---
+
+## 4. Algorithmic Mechanics & Routing Objectives
+
+### 4.1. Edge Weight Formulations
+The routing engine dynamically calculates composite weights ($W_e$) for each edge $e$ in the graph depending on the requested routing objective.
+
+#### 1. Fastest Route (Travel Time in Seconds)
+Minimizes travel time while applying a proactive congestion penalty determined by the PyTorch LSTM traffic forecaster:
+$$W_{\text{fastest}} = \frac{L_e}{S_{\text{current}} / 3.6} \times \left(1.0 + P_{\text{congestion}}\right)$$
+* Where $L_e$ is the segment length (meters).
+* $S_{\text{current}}$ is the current speed in km/h (derived from DB or TomTom, capped between 5.0 km/h and the segment speed limit).
+* $P_{\text{congestion}}$ is the penalty factor:
+$$P_{\text{congestion}} = \max\left(0.0, \frac{S_{\text{base}} - S_{\text{predicted}}}{S_{\text{base}}}\right)$$
+* $S_{\text{base}}$ is the segment speed limit.
+* $S_{\text{predicted}}$ is the model's predicted future speed (km/h) 30 minutes ahead.
+
+#### 2. Safest Route (Danger Minimization)
+Optimizes safety by scaling the segment length according to environmental hazard probability and weather conditions:
+$$W_{\text{safest}} = L_e \times (1.0 + H_e) \times (1.0 + C_{\text{weather}})$$
+* Where $H_e$ is the blended hazard score ($H_e \in [0, 1]$) calculated by combining database records with real-time model outputs:
+$$H_e = \begin{cases} 
+0.7 \times H_{\text{ML}} + 0.3 \times H_{\text{DB}}, & \text{if } H_{\text{DB}} > 0.01 \\
+H_{\text{ML}}, & \text{otherwise}
+\end{cases}$$
+* $C_{\text{weather}}$ is the weather penalty factor (0.4 for heavy rain/storms, 0.2 for fog/mist, 0.0 for clear).
+
+#### 3. Straightest Route (Minimum Steering Deviation)
+Uses a custom A* search algorithm where the edge cost integrates angular turn deviation ($A_{\text{dev}}$) and tortuosity (windingness):
+$$\text{Cost}(u, v) = L_e \times T_e \times (1.0 + A_{\text{dev}} \times 2.5)$$
+* Where $T_e$ is the tortuosity ratio of the segment (actual distance divided by straight-line distance).
+* $A_{\text{dev}}$ is the normalized angular bearing difference between the segment's bearing and the bearing leading directly from node $u$ to the final destination node ($A_{\text{dev}} \in [0, 1]$):
+$$A_{\text{dev}} = \frac{\Delta \theta}{180.0}$$
+$$\Delta \theta = \min(|\theta_{\text{edge}} - \theta_{\text{dest}}|, 360 - |\theta_{\text{edge}} - \theta_{\text{dest}}|)$$
+* The A* search uses the great-circle distance from the current node to the destination as its heuristic function.
+
+#### 4. Popular Route (Scenic & High POI Density)
+Directs the routing flow through areas of high visual interest or tourism density by applying negative weight adjustments proportional to neighboring Points of Interest (POIs):
+$$W_{\text{popular}} = \frac{L_e}{1.0 + \sum_{i \in \text{POIs}} \text{Score}_i}$$
+* Accumulates popularity scores of all landmarks within a $500\text{m}$ radius of the segment's starting node (optimized with bounding-box pre-filtering).
+
+### 4.2. Vehicle Routing Subgraph Constraints
+Prior to executing routing queries, the engine constructs a filtered copy of the network graph according to the vehicle profile requirements:
+
+* **Supercar**: Filters out any edges containing speed bumps (`has_speed_bump = True`) or classified as unpaved/narrow road types (`living_street`, `track`, `unclassified`).
+* **Bike**: Filters out main transportation corridors (`motorway`, `motorway_link`, `trunk`, `trunk_link`).
+* **Truck**: Filters out paths narrower than 3 meters (`width < 3.0`) or restricted residential tracks (`living_street`, `service`, `pedestrian`, `path`).
+
+---
+
+## 5. Machine Learning Models & Neural Networks
+
+### 5.1. Deep Learning: Traffic LSTM Neural Network
+The speed forecaster utilizes a Recurrent Neural Network (RNN) structure designed in PyTorch to predict traffic speeds 30 minutes in the future based on short historical sequences of road conditions.
+
+* **Code Reference**: [TrafficLSTM in app/models/traffic_forecaster.py](file:///d:/Asphr/backend/app/models/traffic_forecaster.py#L21-L33)
+* **Model Class Structure**:
+  ```python
+  class TrafficLSTM(nn.Module):
+      def __init__(self, input_dim=4, hidden_dim=32, num_layers=2, output_dim=1):
+          super(TrafficLSTM, self).__init__()
+          self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=False)
+          self.fc = nn.Linear(hidden_dim, output_dim)
+  ```
+
+#### Sequence Modeling Specifications
+* **Sequence Length ($T$)**: 4 steps (representing historical time steps $t$, $t-15\text{m}$, $t-30\text{m}$, $t-45\text{m}$).
+* **Temporal Target ($T_{\text{target}}$)**: Forecasts traffic speeds 30 minutes into the future ($t+30\text{m}$).
+* **Input Tensor Shape**: $(T, \text{batch\_size}, 4)$, where the input features per step are:
+  1. **Hour of Day** (Scaled: $\text{hour} / 24.0$)
+  2. **Day of Week** (Scaled: $\text{weekday} / 7.0$)
+  3. **Current Speed** (Scaled: $\text{speed\_kmh} / 100.0$)
+  4. **Weather Condition ID** (Encoded index scaled: $\text{weather\_id} / 7.0$)
+* **Model Parameters**:
+  * LSTM Hidden Dimension: 32
+  * Number of LSTM Layers: 2 stacked layers
+  * Output Dimension: 1 (final linear mapping step evaluating future speed value)
+* **Output Rescaling**: The neural network outputs a single scaled parameter in the interval $[0.0, 1.0]$. The inference engine multiplies this by $100.0$ to extract the speed value in km/h, which is then capped between $5.0\text{ km/h}$ and $120.0\text{ km/h}$.
+
+### 5.2. Shallow Machine Learning: Ensemble Hazard Predictor
+The danger classification system runs an ensemble regression model (such as Gradient Boosting Trees) loading through `joblib`.
+
+* **Code Reference**: [HazardPredictor in app/models/hazard_predictor.py](file:///d:/Asphr/backend/app/models/hazard_predictor.py#L23-L157)
+* **Feature Vector Formulation**: For any given road segment, a 1-D feature vector is constructed containing:
+  1. **Telemetry Vibration aggregations**: Mean, standard deviation, and maximum vibration values calculated from raw accelerometer data.
+  2. **Vibration normalized**: Normalizes vibration intensity ($\text{mean\_vibration} / 5.0$), capped at $1.0$.
+  3. **Real-time Traffic metrics**: speed, traffic volume, congestion level ($0$ to $4$).
+  4. **Road Metadata**: lane count, segment length, presence of speed bumps ($0$ or $1$).
+  5. **Weather metrics**: precipitation (mm), visibility (km).
+  6. **Temporal context**: hour of day, night indicator ($0$ or $1$).
+  7. **One-Hot Encoded Road Types**: Motorway, trunk, primary, secondary, tertiary, residential, living street, unclassified.
+  8. **One-Hot Encoded Weather Conditions**: Clear, cloudy, mist, fog, rain, heavy rain, thunderstorm, snow.
+* **Output**: A predicted hazard score in range $[0.0, 1.0]$.
+
+---
+
+## 6. Core Data Pipelines
+
+### 6.1. Dynamic Graph Weight Enrichment Pipeline
+Keeps the in-memory routing network updated with structural, temporal, and atmospheric developments.
+
+```
+                  [Every 5 Minutes (APScheduler)]
+                                 │
+                                 ▼
+                     Fetch database conditions
+            (Hazards, Traffic speeds, Weather grid, IoT)
+                                 │
+                                 ▼
+                    Build ML feature matrices
+            (For Hazard regression & Traffic LSTM prediction)
+                                 │
+                                 ▼
+                       Evaluate ML Models
+             (Batch predict hazard and future speeds)
+                                 │
+                                 ▼
+                    Apply Objective Formulas
+           (Compute weight_fastest, safest, popular, etc.)
+                                 │
+                                 ▼
+                   Broadcast: 'graph_refreshed'
+                  (WebSocket notification alert)
+```
+
+### 6.2. IoT Telemetry Ingestion & Pothole Logging Pipeline
+Processes high-frequency data streams generated by vehicle sensors to detect road anomalies.
+
+```
+       [Hardware Fleet Sensor Packets (GPS + Accelerometer + Gyroscope)]
+                                 │
+                                 ▼
+                     Validate Ingestion Schema
+               (Check device ID, coordinates, axes)
+                                 │
+                                 ▼
+                      Calculate Vibration Level
+                 V = sqrt(accel_x² + accel_y² + accel_z²)
+                                 │
+                                 ▼
+                    Snap GPS to Network Segment
+              (PostGIS query: ST_DWithin search corridor)
+                                 │
+                                 ▼
+                     Classify Pavement Damage
+                 (Smooth, Moderate, Rough, Severe)
+                                 │
+                                 ▼
+                     Persist to 'iot_readings'
+                                 │
+                 ┌───────────────┴───────────────┐
+                 ▼                               ▼
+       [Vibration > Threshold]          [Accident Check]
+      (Insert Segment Hazard)      (Gyro Sudden Stop / Tilt)
+                 │                               │
+                 ▼                               ▼
+      Broadcast: 'hazard_alert'          Trigger SOS Alert
+```
+
+### 6.3. Weather Spatial Grid Aggregator
+Since query rate restrictions limits calling commercial APIs for every segment, the engine uses a sparse-to-dense interpolation pipeline.
+
+```
+               [Every 10 Minutes (APScheduler)]
+                              │
+                              ▼
+            Sample Bounding Box Coordinates (Sparse)
+             (Sample nodes at ~0.1 degree intervals)
+                              │
+                              ▼
+                 Query OpenWeatherMap API
+            (Get temp, rain, wind speed, visibility)
+                              │
+                              ▼
+             Propagate Data to Spatial Polygons
+     (PostGIS ST_Intersects targets centroid cells in weather_grid)
+                              │
+                              ▼
+           Commit Updates & Broadcast WebSocket Event
+```
+
+---
+
+## 7. Data Transmission Protocols & Schema Specifications
+
+### 7.1. REST API Router Specifications
+Communication between the backend server and API consumers relies on standard HTTP REST JSON contracts.
+
+#### 1. Compute Route Route
+* **Endpoint**: `POST /api/v1/routes/compute`
+* **Request Schema ([RouteRequest](file:///d:/Asphr/backend/app/schemas/route_schemas.py#L8-L13))**:
+  ```json
+  {
+    "origin": { "lat": 19.0760, "lon": 72.8777 },
+    "destination": { "lat": 19.0222, "lon": 72.8550 },
+    "route_type": "safest",
+    "vehicle_type": "supercar",
+    "avoid_tolls": true
+  }
+  ```
+* **Response Schema**:
+  ```json
+  {
+    "route_id": "route_987654",
+    "geometry": {
+      "type": "LineString",
+      "coordinates": [ [72.8777, 19.0760], [72.8722, 19.0650], [72.8550, 19.0222] ]
+    },
+    "distance_km": 6.82,
+    "duration_min": 14,
+    "hazard_score_avg": 0.12,
+    "segments": [
+      { "id": 1452, "hazard": 0.05, "traffic": "free-flow" }
+    ],
+    "weather_alerts": [ "Weather clear along the selected route." ],
+    "instructions": [
+      { "instruction": "Start your journey", "distance_meters": 0 },
+      { "instruction": "Turn right onto next road", "distance_meters": 540 }
+    ],
+    "search_stats": {
+      "total_nodes_in_search_area": 1240,
+      "nodes_selected": 45,
+      "search_time_ms": 12.4,
+      "algorithm": "Dijkstra",
+      "graph_total_nodes": 85200
+    }
+  }
+  ```
+
+#### 2. Submit RLHF Route Feedback Route
+* **Endpoint**: `POST /api/v1/routes/feedback` (processed asynchronously in backend)
+* **Request Schema ([FeedbackRequest](file:///d:/Asphr/backend/app/schemas/route_schemas.py#L15-L22))**:
+  ```json
+  {
+    "user_id": "usr_9988",
+    "start_point": { "lat": 19.0760, "lon": 72.8777 },
+    "end_point": { "lat": 19.0222, "lon": 72.8550 },
+    "route_geometry": [ [72.8777, 19.0760], [72.8550, 19.0222] ],
+    "route_type": "fastest",
+    "rating": 4,
+    "feedback_text": "Good route but avoided main highway bypass unnecessarily."
+  }
+  ```
+
+### 7.2. WebSocket Event Framework
+Real-time state and alert updates operate over permanent WebSocket connections (`ws://<backend_url>/ws`).
+
+#### Client to Server Messages
+* **Ping Event**:
+  `{"type": "ping"}` (Server responds with `{"type": "pong"}`)
+* **Report Hazard Event**: Allows clients to report road anomalies manually:
+  ```json
+  {
+    "type": "report_hazard",
+    "segment_id": 45120,
+    "hazard_type": "pothole",
+    "hazard_score": 0.8,
+    "expires_in_sec": 7200
+  }
+  ```
+
+#### Server Broadcast Events (To All Connected Clients)
+* **Hazard Alert Broadcast**: Triggered immediately when a manual report is verified or telemetry exceeds danger thresholds:
+  ```json
+  {
+    "type": "hazard_alert",
+    "data": {
+      "id": 894,
+      "segment_id": 45120,
+      "hazard_type": "pothole",
+      "hazard_score": 0.8,
+      "recorded_at": "2026-06-28T08:32:00Z",
+      "expires_at": "2026-06-28T10:32:00Z"
+    }
+  }
+  ```
+* **Weather Updated Notification**:
+  `{"type": "weather_updated", "timestamp": "2026-06-28T08:30:00Z", "status": "success"}`
+* **Graph Refreshed Notification**:
+  `{"type": "graph_refreshed", "timestamp": "2026-06-28T08:35:00Z", "status": "success"}`
+
+---
+
+## 8. Database Schema & Data Models
+
+The relational entities are built using SQLAlchemy ORM models mapped to PostGIS geographic tables.
+
+* **Code Reference**: [app/models/db_models.py](file:///d:/Asphr/backend/app/models/db_models.py)
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                               road_segments                              │
+├───────────────────┬────────────────────────┬─────────────────────────────┤
+│ Column            │ Type                   │ Modifiers                   │
+├───────────────────┼────────────────────────┼─────────────────────────────┤
+│ id (PK)           │ INTEGER                │ SERIAL                      │
+│ osm_way_id        │ BIGINT                 │ Nullable                    │
+│ source_node       │ BIGINT                 │ NOT NULL, INDEXED           │
+│ target_node       │ BIGINT                 │ NOT NULL, INDEXED           │
+│ geometry          │ GEOMETRY(LineString)   │ NOT NULL, GIST INDEXED      │
+│ length_meters     │ FLOAT                  │ NOT NULL                    │
+│ road_type         │ VARCHAR(50)            │ Nullable                    │
+│ max_speed         │ INTEGER                │ Nullable                    │
+│ lanes             │ INTEGER                │ Nullable                    │
+│ has_speed_bump    │ BOOLEAN                │ DEFAULT FALSE               │
+│ is_toll           │ BOOLEAN                │ DEFAULT FALSE               │
+│ created_at        │ TIMESTAMP              │ DEFAULT NOW()               │
+└───────────────────┴────────────────────────┴─────────────────────────────┘
+                                  │
+      ┌───────────────────────────┴───────────────────────────┐
+      ▼                                                       ▼
+┌───────────────────────────┐                           ┌───────────────────────────┐
+│      segment_hazards      │                           │     traffic_conditions    │
+├──────────────┬────────────┤                           ├──────────────┬────────────┤
+│ id (PK)      │ INTEGER    │                           │ id (PK)      │ INTEGER    │
+│ segment_id   │ FK (rs.id) │                           │ segment_id   │ FK (rs.id) │
+│ hazard_score │ FLOAT      │                           │ speed_kmh    │ FLOAT      │
+│ hazard_type  │ VARCHAR(50)│                           │ congestion   │ INT [0-4]  │
+│ confidence   │ FLOAT      │                           │ volume       │ INTEGER    │
+│ source       │ VARCHAR(20)│                           │ recorded_at  │ TIMESTAMP  │
+│ recorded_at  │ TIMESTAMP  │                           └───────────────────────────┘
+│ expires_at   │ TIMESTAMP  │
+└──────────────┴────────────┘
+      ▲
+      │
+┌───────────────────────────┐                           ┌───────────────────────────┐
+│        iot_readings       │                           │        weather_grid       │
+├──────────────┬────────────┤                           ├──────────────┬────────────┤
+│ id (PK)      │ INTEGER    │                           │ id (PK)      │ INTEGER    │
+│ device_id    │ VARCHAR(50)│                           │ cell_geometry│ GEOM(Poly) │
+│ segment_id   │ FK (rs.id) │                           │ temperature  │ FLOAT      │
+│ latitude     │ FLOAT      │                           │ humidity     │ FLOAT      │
+│ longitude    │ FLOAT      │                           │ visibility   │ FLOAT      │
+│ accel_x/y/z  │ FLOAT      │                           │ precip_mm    │ FLOAT      │
+│ gyro_x/y/z   │ FLOAT      │                           │ wind_speed   │ FLOAT      │
+│ vibration    │ FLOAT      │                           │ condition    │ VARCHAR(50)│
+│ condition    │ VARCHAR(20)│                           │ recorded_at  │ TIMESTAMP  │
+│ timestamp    │ TIMESTAMP  │                           └───────────────────────────┘
+└──────────────┴────────────┘
+```
+
+### 8.1. SQL Spatial Schema and Index Setup
+To run the project, the database must have the `postgis` extension enabled. Below are the SQL table creation definitions including PostGIS index configurations:
 
 ```sql
--- Core road network graph (extracted from OpenStreetMap)
+-- Enable Spatial Engine Extension
+CREATE EXTENSION IF NOT EXISTS postgis;
+
+-- Core network segments mapped from OpenStreetMap
 CREATE TABLE road_segments (
     id SERIAL PRIMARY KEY,
     osm_way_id BIGINT,
@@ -114,38 +484,39 @@ CREATE TABLE road_segments (
     target_node BIGINT NOT NULL,
     geometry GEOMETRY(LineString, 4326) NOT NULL,
     length_meters FLOAT NOT NULL,
-    road_type VARCHAR(50),              -- motorway, residential, etc.
-    max_speed INT,
-    lanes INT,
+    road_type VARCHAR(50),
+    max_speed INTEGER,
+    lanes INTEGER,
     has_speed_bump BOOLEAN DEFAULT FALSE,
     is_toll BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW()
 );
 
+-- R-Tree Indexing for fast geometry lookups
 CREATE INDEX idx_road_segments_geom ON road_segments USING GIST(geometry);
 CREATE INDEX idx_road_segments_source ON road_segments(source_node);
 CREATE INDEX idx_road_segments_target ON road_segments(target_node);
 
--- Dynamic hazard scores (updated by ML model + IoT)
+-- Dynamic Segment Hazards (Dynamic ML weights)
 CREATE TABLE segment_hazards (
     id SERIAL PRIMARY KEY,
-    segment_id INT REFERENCES road_segments(id) ON DELETE CASCADE,
-    hazard_score FLOAT NOT NULL CHECK (hazard_score BETWEEN 0 AND 1),
-    hazard_type VARCHAR(50),            -- pothole, wet_road, accident_prone
+    segment_id INTEGER REFERENCES road_segments(id) ON DELETE CASCADE,
+    hazard_score FLOAT NOT NULL CHECK (hazard_score BETWEEN 0.0 AND 1.0),
+    hazard_type VARCHAR(50),
     confidence FLOAT,
-    source VARCHAR(20),                 -- 'iot', 'weather_api', 'ml_model'
+    source VARCHAR(20),
     recorded_at TIMESTAMP DEFAULT NOW(),
-    expires_at TIMESTAMP                -- TTL for transient hazards
+    expires_at TIMESTAMP
 );
 
-CREATE INDEX idx_hazards_segment ON segment_hazards(segment_id);
-CREATE INDEX idx_hazards_time ON segment_hazards(recorded_at);
+CREATE INDEX idx_segment_hazards_segment ON segment_hazards(segment_id);
+CREATE INDEX idx_segment_hazards_recorded ON segment_hazards(recorded_at);
 
--- IoT sensor readings from hardware fleet
+-- Real-time IoT Accelerometer/Gyro Telemetry
 CREATE TABLE iot_readings (
     id SERIAL PRIMARY KEY,
     device_id VARCHAR(50) NOT NULL,
-    segment_id INT REFERENCES road_segments(id),
+    segment_id INTEGER REFERENCES road_segments(id) ON DELETE SET NULL,
     latitude FLOAT NOT NULL,
     longitude FLOAT NOT NULL,
     accel_x FLOAT,
@@ -154,31 +525,27 @@ CREATE TABLE iot_readings (
     gyro_x FLOAT,
     gyro_y FLOAT,
     gyro_z FLOAT,
-    vibration_level FLOAT,              -- derived: magnitude of accel
-    road_condition VARCHAR(20),         -- smooth, moderate, rough, severe
+    vibration_level FLOAT,
+    road_condition VARCHAR(20),
     timestamp TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_iot_device ON iot_readings(device_id);
-CREATE INDEX idx_iot_location ON iot_readings USING GIST(
-    ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
-);
-CREATE INDEX idx_iot_time ON iot_readings(timestamp);
+CREATE INDEX idx_iot_readings_device ON iot_readings(device_id);
+CREATE INDEX idx_iot_readings_timestamp ON iot_readings(timestamp);
 
--- Traffic conditions (from APIs + historical)
+-- Real-time Traffic Flows (TomTom updates)
 CREATE TABLE traffic_conditions (
     id SERIAL PRIMARY KEY,
-    segment_id INT REFERENCES road_segments(id),
+    segment_id INTEGER REFERENCES road_segments(id) ON DELETE CASCADE,
     speed_kmh FLOAT,
-    congestion_level INT CHECK (congestion_level BETWEEN 0 AND 4),
-    traffic_volume INT,
+    congestion_level INTEGER CHECK (congestion_level BETWEEN 0 AND 4),
+    traffic_volume INTEGER,
     recorded_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_traffic_segment ON traffic_conditions(segment_id);
-CREATE INDEX idx_traffic_time ON traffic_conditions(recorded_at);
+CREATE INDEX idx_traffic_conditions_segment ON traffic_conditions(segment_id);
 
--- Weather conditions per geographic grid cell
+-- Atmospheric Spatial Grid Cells
 CREATE TABLE weather_grid (
     id SERIAL PRIMARY KEY,
     cell_geometry GEOMETRY(Polygon, 4326) NOT NULL,
@@ -187,38 +554,25 @@ CREATE TABLE weather_grid (
     visibility_km FLOAT,
     precipitation_mm FLOAT,
     wind_speed_kmh FLOAT,
-    weather_condition VARCHAR(50),      -- clear, rain, fog, snow
+    weather_condition VARCHAR(50),
     recorded_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_weather_geom ON weather_grid USING GIST(cell_geometry);
+CREATE INDEX idx_weather_grid_geom ON weather_grid USING GIST(cell_geometry);
 
--- Popular places for "Popular Route" feature
+-- Points of Interest (Scenic routes generator)
 CREATE TABLE popular_places (
     id SERIAL PRIMARY KEY,
     name VARCHAR(200) NOT NULL,
-    category VARCHAR(50),               -- tourist, food, landmark
+    category VARCHAR(50),
     geometry GEOMETRY(Point, 4326) NOT NULL,
     popularity_score FLOAT,
     city VARCHAR(100)
 );
 
-CREATE INDEX idx_places_geom ON popular_places USING GIST(geometry);
-CREATE INDEX idx_places_city ON popular_places(city);
+CREATE INDEX idx_popular_places_geom ON popular_places USING GIST(geometry);
 
--- Vehicle profiles for routing constraints
-CREATE TABLE vehicle_profiles (
-    id SERIAL PRIMARY KEY,
-    vehicle_type VARCHAR(50) NOT NULL,    -- bike, car, truck, supercar
-    max_width_m FLOAT,
-    max_height_m FLOAT,
-    min_road_width_m FLOAT,
-    avoid_speed_bumps BOOLEAN,
-    allow_narrow_roads BOOLEAN,
-    prefer_highways BOOLEAN
-);
-
--- SOS alerts from hardware
+-- Safety alert records
 CREATE TABLE sos_alerts (
     id SERIAL PRIMARY KEY,
     device_id VARCHAR(50),
@@ -229,15 +583,15 @@ CREATE TABLE sos_alerts (
     hospital_notified BOOLEAN DEFAULT FALSE
 );
 
--- Route history for RLHF data collection
+-- RLHF Route feedback database table
 CREATE TABLE route_feedback (
     id SERIAL PRIMARY KEY,
     user_id VARCHAR(100),
     start_point GEOMETRY(Point, 4326),
     end_point GEOMETRY(Point, 4326),
     route_geometry GEOMETRY(LineString, 4326),
-    route_type VARCHAR(20),             -- fastest, safest, etc.
-    rating INT CHECK (rating BETWEEN 1 AND 5),
+    route_type VARCHAR(20),
+    rating INTEGER CHECK (rating BETWEEN 1 AND 5),
     feedback_text TEXT,
     created_at TIMESTAMP DEFAULT NOW()
 );
@@ -245,352 +599,27 @@ CREATE TABLE route_feedback (
 
 ---
 
-## Phase 2: Free APIs & Data Sources
-
-| Requirement | API | Endpoint Pattern | Rate Limit | Key Data |
-|-------------|-----|------------------|------------|----------|
-| **Base Maps & Geocoding** | Mapbox | `api.mapbox.com/geocoding/v5/mapbox.places/` | 50k/month free | Forward/reverse geocoding, directions |
-| **OSM Road Data** | Overpass API | `overpass-api.de/api/interpreter` | Fair use | Raw road network for graph building |
-| **Real-time Traffic** | TomTom Traffic API | `api.tomtom.com/traffic/services/4/flowSegmentData/` | 2.5k/day free | Speed, congestion per road segment |
-| **Weather** | OpenWeatherMap | `api.openweathermap.org/data/2.5/weather` | 60 calls/min free | Temp, visibility, precipitation |
-| **Weather (alt)** | Open-Meteo | `api.open-meteo.com/v1/forecast` | Unlimited | No API key needed |
-| **Elevation** | Open-Elevation | `api.open-elevation.com/api/v1/lookup` | Fair use | Slope calculation for hazard scoring |
-| **Popular Places** | Overpass API (OSM) | Query `tourism=attraction`, `amenity=restaurant` | Fair use | POI data for popular routes |
-
-**API Orchestration Strategy**: Build a `DataAggregator` service that hits these APIs every 5 minutes, normalizes responses, and writes to your Supabase tables. Cache aggressively with Redis (or in-memory for hackathon).
-
----
-
-## Phase 3: Backend Build — Step-by-Step
-
-### Step 3.1: Environment Setup
-1. Create Python virtual environment: `python -m venv venv`
-2. `pip install fastapi uvicorn sqlalchemy psycopg2-binary geoalchemy2 shapely networkx osmnx scikit-learn torch pandas numpy httpx pydantic-settings`
-3. Create `.env` file with Supabase connection string, Mapbox token, API keys.
-
-### Step 3.2: FastAPI Skeleton (`app/main.py`)
-1. Initialize FastAPI app with CORS middleware (allow Vercel domain).
-2. Create lifespan context manager for startup/shutdown events.
-3. Mount routers from `routers/` directory.
-4. Health check endpoint at `/health` returning DB connection status.
-
-### Step 3.3: Database Connection (`app/config.py`)
-1. Use SQLAlchemy async engine (`create_async_engine`) with Supabase connection pool.
-2. Define `get_db()` dependency for FastAPI route injection.
-3. Create `Base` declarative base for ORM models.
-
-### Step 3.4: Graph Construction Algorithm (`app/algorithms/graph_builder.py`)
-
-**Purpose**: Convert OSM data into a traversable NetworkX graph with ML-enriched edge weights.
-
-1. **Fetch OSM Data**: Use `osmnx.graph_from_place()` or Overpass API to download road network for target city.
-2. **Simplify Graph**: `osmnx.simplify_graph()` to remove intermediate nodes.
-3. **Enrich Edges**: For each edge, query:
-   - `segment_hazards` → aggregate hazard score
-   - `traffic_conditions` → current speed / congestion
-   - `weather_grid` → weather impact factor
-   - `iot_readings` → real-time vibration/condition
-4. **Compute Composite Weights**:
-   - **Fastest**: `weight = distance / (current_speed + ε)`
-   - **Safest**: `weight = distance × (1 + hazard_score) × (1 + weather_penalty)`
-   - **Straightest**: `weight = distance × (1 + angular_deviation_from_bearing)`
-   - **Popular**: `weight = distance / (1 + nearby_popularity_density)`
-5. **Store Graph**: Save as NetworkX pickle or adjacency list in memory (refresh every 5 min).
-
-### Step 3.5: Multi-Objective Route Optimizer (`app/models/route_optimizer.py`)
-
-**Core Algorithm**: Modified Dijkstra with dynamic edge weight recomputation.
-
-1. **Input**: `start_lat, start_lon, end_lat, end_lon, route_type, vehicle_type`
-2. **Snap to Graph**: Find nearest graph nodes using KD-tree or Ball tree.
-3. **Vehicle Filtering**: Pre-filter edges based on `vehicle_profiles` (width constraints, speed bump avoidance).
-4. **Weight Selection**: Choose weight function based on `route_type` parameter.
-5. **Pathfinding**:
-   - **Fastest/Safest**: Use `networkx.shortest_path()` with custom weight attribute.
-   - **Straightest**: Implement A* where heuristic = great-circle distance to destination, but edge cost includes angular penalty.
-   - **Popular**: Use bidirectional Dijkstra with edge cost reduced by proximity to `popular_places`.
-6. **Output**: Ordered list of coordinates, segment IDs, total distance, estimated time, hazard summary.
-
-### Step 3.6: Hazard Prediction Model (`app/models/hazard_predictor.py`)
-
-**Architecture**: Gradient Boosting (XGBoost/LightGBM) or small Neural Net.
-
-**Features**:
-- Historical IoT vibration levels per segment
-- Weather conditions (precipitation, visibility)
-- Road type (residential roads more hazardous)
-- Time of day (night driving risk)
-- Recent accident density
-
-**Training Pipeline** (run locally in `ml-training/`):
-1. Aggregate `iot_readings` by segment, compute mean vibration, std dev.
-2. Join with `weather_grid` and `traffic_conditions`.
-3. Label: `hazard_score = sigmoid(vibration_normalized + weather_penalty + traffic_penalty)`.
-4. Train model, export as `.pkl` (sklearn) or `.pt` (PyTorch if using NN).
-5. Load model in FastAPI startup, predict on-the-fly for route requests.
-
-### Step 3.7: Traffic Forecaster (`app/models/traffic_forecaster.py`)
-
-**Architecture**: LSTM or Temporal Fusion Transformer (simpler: LSTM).
-
-**Purpose**: Predict traffic 15-30 min ahead for proactive routing.
-
-1. **Data**: Time-series of `traffic_conditions` per segment.
-2. **Model**: `torch.nn.LSTM` with input shape `(seq_len, batch, features)` where features = [hour_of_day, day_of_week, historical_speed, weather_condition_encoded].
-3. **Inference**: For requested route, predict future speeds at estimated arrival times per segment.
-4. **Integration**: Add predicted congestion penalty to fastest route weights.
-
-### Step 3.8: Geocoding Service (`app/services/geocoding_service.py`)
-
-1. **Forward Geocode**: Call Mapbox Geocoding API with query string → return `[lon, lat]`.
-2. **Reverse Geocode**: Call Mapbox with `[lon, lat]` → return address components.
-3. **Cache**: Store results in Supabase `popular_places` or in-memory dict to reduce API calls.
-4. **Fallback**: If Mapbox limit reached, use Nominatim (OpenStreetMap) with 1-second rate limiting.
-
-### Step 3.9: IoT Data Ingestion Service (`app/services/iot_service.py`)
-
-1. **POST Endpoint**: `/api/v1/iot/ingest` — hardware sends JSON payload.
-2. **Validation**: Pydantic schema checks required fields (device_id, lat, lon, accelerometer).
-3. **Processing**:
-   - Compute `vibration_level = sqrt(accel_x² + accel_y² + accel_z²)`.
-   - Classify: `smooth < 0.5 < moderate < 1.5 < rough < 3.0 < severe`.
-   - Map lat/lon to nearest `road_segments` using PostGIS `ST_DWithin` query.
-4. **Write**: Insert into `iot_readings` table.
-5. **Trigger**: If `vibration_level > THRESHOLD` and `gyro` indicates crash pattern (sudden stop + tilt), insert into `sos_alerts` and trigger notification logic.
-
-### Step 3.10: Route API Endpoints (`app/routers/routes.py`)
-
-Implement these endpoints:
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/v1/routes/compute` | Main routing engine |
-| GET | `/api/v1/routes/types` | List available route types |
-| GET | `/api/v1/routes/hazards` | Get hazard heatmap for bounding box |
-| POST | `/api/v1/routes/feedback` | RLHF data collection |
-
-**`/api/v1/routes/compute` Request Body**:
-```json
-{
-  "origin": {"lat": 12.9716, "lon": 77.5946},
-  "destination": {"lat": 12.9352, "lon": 77.6245},
-  "route_type": "safest",
-  "vehicle_type": "bike",
-  "avoid_tolls": false
-}
-```
-
-**Response**:
-```json
-{
-  "route_id": "uuid",
-  "geometry": {"type": "LineString", "coordinates": [...]},
-  "distance_km": 8.4,
-  "duration_min": 24,
-  "hazard_score_avg": 0.23,
-  "segments": [{"id": 1, "hazard": 0.1, "traffic": "moderate"}],
-  "weather_alerts": ["Light rain expected in 15 min"]
-}
-```
-
-### Step 3.11: Background Tasks & Scheduling
-1. Use `fastapi.BackgroundTasks` for non-critical operations (feedback logging).
-2. Use `APScheduler` or `celery` (overkill for hackathon) for:
-   - Refreshing weather data every 10 minutes.
-   - Recomputing graph edge weights every 5 minutes.
-   - Expiring old `segment_hazards` records.
-
----
-
-## Phase 4: Frontend Build — Step-by-Step
-
-### Step 4.1: React + Mapbox Setup
-1. `npx create-react-app frontend` (or Vite for faster builds).
-2. `npm install mapbox-gl axios react-query zustand react-router-dom lucide-react tailwindcss`.
-3. Configure Mapbox GL JS with your token in `.env`.
-
-### Step 4.2: Page Structure
-
-| Page | Route | Features |
-|------|-------|----------|
-| **Home** | `/` | Full-screen Mapbox map, search bars (origin/destination), route type selector, vehicle selector, "Navigate" button |
-| **Route Detail** | `/route/:routeId` | Turn-by-turn list, elevation profile, weather overlay, hazard warnings, "Start Navigation" simulation |
-| **Analytics** | `/analytics` | (Bonus) IoT heatmap, sensor density, recent SOS alerts |
-
-### Step 4.3: Component Architecture
-
-**Home Page Layout**:
-1. **Map Component** (`components/Map/MapboxMap.jsx`):
-   - Initialize Mapbox with `mapboxgl.Map`.
-   - Add sources: `routes` (line layer), `hazards` (heatmap/circle layer), `iot` (real-time dots).
-   - Fit bounds to route geometry when computed.
-
-2. **Search Bar** (`components/SearchBar/SearchBar.jsx`):
-   - Two inputs: Origin, Destination.
-   - Debounced Mapbox Geocoding API calls (300ms).
-   - Dropdown suggestions with place names.
-
-3. **Route Type Selector** (`components/RouteTypes/RouteTypeSelector.jsx`):
-   - Four cards: Fastest (Zap icon), Safest (Shield icon), Straightest (ArrowRight icon), Popular (Star icon).
-   - Active state highlights selected type.
-   - On change, re-fetches route if origin/destination exist.
-
-4. **Vehicle Selector** (`components/VehicleSelector/VehicleSelector.jsx`):
-   - Horizontal scroll: Bike, Car, Truck, Supercar.
-   - Icons change route constraints (bike → narrow roads OK, supercar → avoid speed bumps).
-
-5. **Route Panel** (`components/RoutePanel/RoutePanel.jsx`):
-   - Shows computed route summary: distance, time, safety score.
-   - "Start" button simulates navigation (pulsing dot along route).
-
-### Step 4.4: State Management (Zustand)
-
-Create `store/navigationStore.js`:
-- `origin`, `destination` (lat/lon objects)
-- `routeType`, `vehicleType`
-- `currentRoute` (geometry + metadata from backend)
-- `hazards` (array for map overlay)
-- `iotReadings` (real-time updates via polling)
-
-### Step 4.5: API Integration
-
-Create `services/api.js`:
-- Axios instance with base URL pointing to Railway backend.
-- Functions: `computeRoute(payload)`, `geocode(query)`, `reverseGeocode(lon,lat)`, `getHazards(bbox)`.
-- React Query hooks for caching and background refetching.
-
-### Step 4.6: Real-Time IoT Visualization
-1. Poll `/api/v1/iot/readings?bbox=minLon,minLat,maxLon,maxLat` every 5 seconds.
-2. Update Mapbox source `iot` with new GeoJSON points.
-3. Color-code by `road_condition`: green (smooth) → yellow (moderate) → red (severe).
-
-### Step 4.7: RLHF Feedback UI
-1. After route completion (or on Route Detail page), show 5-star rating.
-2. Text input: "What was wrong with this route?"
-3. POST to `/api/v1/routes/feedback` with route geometry and rating.
-
----
-
-## Phase 5: Deployment Guide
-
-### Step 5.1: Backend → Railway
-
-1. **Prepare Repository**:
-   - Ensure `backend/` is a git repo (or use Railway CLI).
-   - `requirements.txt` must include all dependencies.
-   - `Dockerfile`:
-     ```dockerfile
-     FROM python:3.11-slim
-     WORKDIR /app
-     COPY requirements.txt .
-     RUN pip install --no-cache-dir -r requirements.txt
-     COPY app/ ./app/
-     CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-     ```
-
-2. **Railway Setup**:
-   - Login to railway.app, create new project.
-   - Connect GitHub repo, select `backend/` as root directory.
-   - Add environment variables in Railway dashboard:
-     - `DATABASE_URL` (from Supabase → Connection string → URI)
-     - `MAPBOX_TOKEN`
-     - `OPENWEATHER_API_KEY`
-     - `TOMTOM_API_KEY`
-   - Deploy. Railway auto-detects Dockerfile.
-
-3. **Verify**:
-   - Visit `https://your-project.railway.app/health`.
-   - Should return `{"status": "ok", "db": "connected"}`.
-
-### Step 5.2: Database → Supabase
-
-1. Create project at supabase.com.
-2. In SQL Editor, run all table creation queries from Phase 1.
-3. Enable Row Level Security (RLS) later; for hackathon, keep open.
-4. Copy connection string from Settings → Database → Connection Pooling → URI.
-5. Test connection from local backend before deploying.
-
-### Step 5.3: Frontend → Vercel
-
-1. **Build Configuration**:
-   - `vercel.json`:
-     ```json
-     {
-       "buildCommand": "npm run build",
-       "outputDirectory": "build",
-       "framework": "create-react-app"
-     }
-     ```
-
-2. **Environment Variables** in Vercel dashboard:
-   - `REACT_APP_MAPBOX_TOKEN`
-   - `REACT_APP_API_URL=https://your-project.railway.app`
-
-3. **Deploy**:
-   - Connect GitHub repo to Vercel.
-   - Set root directory to `frontend/`.
-   - Deploy. Vercel provides HTTPS URL instantly.
-
-### Step 5.4: Hardware Integration
-
-1. Configure IoT devices to POST to `https://your-project.railway.app/api/v1/iot/ingest`.
-2. Ensure JSON payload matches `iot_schemas.py` Pydantic model.
-3. Test with sample curl:
-   ```bash
-   curl -X POST https://your-project.railway.app/api/v1/iot/ingest \
-     -H "Content-Type: application/json" \
-     -d '{"device_id":"bike_01","latitude":12.97,"longitude":77.59,"accel_x":0.1,"accel_y":0.0,"accel_z":9.8}'
-   ```
-
-### Step 5.5: End-to-End Verification Checklist
-
-- [ ] Mapbox map loads on Vercel frontend.
-- [ ] Search bar returns geocoding suggestions.
-- [ ] Compute route returns valid geometry for all 4 route types.
-- [ ] IoT data appears as dots on map within 10 seconds of ingestion.
-- [ ] SOS alert creates record in `sos_alerts` table.
-- [ ] Weather conditions affect safest route path (test during rain).
-- [ ] Vehicle selector changes route (bike through narrow road, truck avoids it).
-
----
-
-## Phase 6: Hackathon Execution Strategy
-
-**Day 1 Morning**: 
-- Set up repo, Supabase tables, Railway + Vercel skeletons.
-- Get one API working (Mapbox geocoding → route display).
-
-**Day 1 Afternoon**: 
-- Build graph from OSM for your demo city.
-- Implement basic Dijkstra for fastest route.
-
-**Day 2 Morning**: 
-- Add hazard scoring from IoT data.
-- Implement safest route variant.
-- Add vehicle constraints.
-
-**Day 2 Afternoon**: 
-- Polish UI, add route type selector animations.
-- Test end-to-end with live IoT data.
-- Prepare demo narrative: "Our sensors see what Google can't."
-
-**Pitch Angle**: *"While others use crowdsourced reports, we have ground-truth sensors. While others give you one route, we optimize for your priorities. While others call an ambulance after you crash, we call before you stop moving."*
-
----
-
-## Algorithm & Model Summary
-
-| Component | Algorithm/Model | Input | Output |
-|-----------|----------------|-------|--------|
-| Graph | NetworkX + OSMnx | OpenStreetMap data | Traversable road graph |
-| Fastest Route | Dijkstra | Distance, speed | Min-time path |
-| Safest Route | Dijkstra with hazard weights | IoT + weather + traffic | Min-risk path |
-| Straightest Route | A* with bearing heuristic | Coordinates | Min-turn path |
-| Popular Route | Dijkstra with POI density | Popular places | Scenic path |
-| Hazard Prediction | XGBoost / LightGBM | Vibration, weather, road type | 0-1 hazard score |
-| Traffic Forecast | LSTM | Historical speed, time | Future speed prediction |
-| SOS Detection | Rule-based threshold | Gyro + accelerometer pattern | Accident alert |
-
----
-
-**Final Strategic Note from Alexander**: In a hackathon, judges remember *demos*, not architecture diagrams. Build the "safest route for bikes with live pothole detection" vertical first. Make the map show red dots where your hardware detected bumps. That single visualization proves your entire thesis. Everything else is optimization.
+## 9. Code Mapping Directory Reference
+
+The following table maps system architectural boundaries to specific project implementation code symbols and directories.
+
+| Architecture Scope | Code Base Location | Main Program Symbols |
+| :--- | :--- | :--- |
+| **API Entry Point** | [app/main.py](file:///d:/Asphr/backend/app/main.py) | [lifespan](file:///d:/Asphr/backend/app/main.py#L22-L70) manager, CORS settings, App initialization |
+| **Database Connections** | [app/config.py](file:///d:/Asphr/backend/app/config.py) | `AsyncSessionLocal`, `get_db()`, API keys loading |
+| **Graph Loading & Enrichment** | [app/algorithms/graph_builder.py](file:///d:/Asphr/backend/app/algorithms/graph_builder.py) | [GraphManager](file:///d:/Asphr/backend/app/algorithms/graph_builder.py#L74-L728), [calculate_bearing](file:///d:/Asphr/backend/app/algorithms/graph_builder.py#L33-L40), `enrich_graph_weights` |
+| **Pathfinding Computations** | [app/models/route_optimizer.py](file:///d:/Asphr/backend/app/models/route_optimizer.py) | [RouteOptimizer](file:///d:/Asphr/backend/app/models/route_optimizer.py#L9-L261), `get_vehicle_filtered_graph`, `compute_route` |
+| **Traffic Sequence Neural Net** | [app/models/traffic_forecaster.py](file:///d:/Asphr/backend/app/models/traffic_forecaster.py) | [TrafficLSTM](file:///d:/Asphr/backend/app/models/traffic_forecaster.py#L21-L33) class model, [TrafficForecaster](file:///d:/Asphr/backend/app/models/traffic_forecaster.py#L35-L207) singleton |
+| **Gradient Boosting Regression** | [app/models/hazard_predictor.py](file:///d:/Asphr/backend/app/models/hazard_predictor.py) | [HazardPredictor](file:///d:/Asphr/backend/app/models/hazard_predictor.py#L23-L157) class singleton, `predict_segment_hazard` |
+| **Routing Orchestration Service**| [app/services/route_service.py](file:///d:/Asphr/backend/app/services/route_service.py) | [RouteService](file:///d:/Asphr/backend/app/services/route_service.py#L11-L115), `generate_turn_instructions`, `compute_route_service` |
+| **Address Forwarding Geocoder**| [app/services/geocoding_service.py](file:///d:/Asphr/backend/app/services/geocoding_service.py) | [GeocodingService](file:///d:/Asphr/backend/app/services/geocoding_service.py#L16-L274) forward/reverse caching engine |
+| **Background Scheduler** | [app/services/scheduler.py](file:///d:/Asphr/backend/app/services/scheduler.py) | `refresh_weather_grid_job`, `enrich_graph_weights_job`, `setup_scheduler` |
+| **Weather Interpolator** | [app/services/weather_service.py](file:///d:/Asphr/backend/app/services/weather_service.py) | [refresh_weather_grid](file:///d:/Asphr/backend/app/services/weather_service.py#L96-L181), `fetch_weather_for_point` |
+| **WebSocket Connection Manager**| [app/services/websocket_manager.py](file:///d:/Asphr/backend/app/services/websocket_manager.py) | [ConnectionManager](file:///d:/Asphr/backend/app/services/websocket_manager.py#L7-L45) broadcast pool singleton |
+| **HTTP Routing Endpoints** | [app/routers/routes.py](file:///d:/Asphr/backend/app/routers/routes.py) | `compute_route`, `get_hazards_heatmap`, `log_route_feedback` |
+| **HTTP Geocoding Endpoints** | [app/routers/geocode.py](file:///d:/Asphr/backend/app/routers/geocode.py) | `forward_geocode`, `reverse_geocode` |
+| **WebSocket Comm Endpoint** | [app/routers/websocket.py](file:///d:/Asphr/backend/app/routers/websocket.py) | `websocket_endpoint` event loop, hazard reporting logic |
+| **Custom DB Endpoint** | [app/routers/custom_db.py](file:///d:/Asphr/backend/app/routers/custom_db.py) | `get_popular_places`, `get_weather_grid`, `get_heavy_traffic` |
+| **React App Map Pages** | [frontend/src/pages/Maps.jsx](file:///d:/Asphr/frontend/src/pages/Maps.jsx) | Mapbox GL JS map loading, routing interaction, WebSockets connection |
+| **React Navigation Pages** | [frontend/src/pages/Routes.jsx](file:///d:/Asphr/frontend/src/pages/Routes.jsx) | Active route list details, directions instructions |
+| **React Services Panel** | [frontend/src/pages/Services.jsx](file:///d:/Asphr/frontend/src/pages/Services.jsx) | UI panels configuration controls |
