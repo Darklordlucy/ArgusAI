@@ -79,7 +79,7 @@ CREATE TABLE weather_grid (
     visibility_km FLOAT,
     precipitation_mm FLOAT,
     wind_speed_kmh FLOAT,
-    weather_condition VARCHAR(50),      -- clear, rain, fog, snow
+    weather_condition VARCHAR(50),      
     recorded_at TIMESTAMP DEFAULT NOW()
 );
 
