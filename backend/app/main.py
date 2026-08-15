@@ -94,6 +94,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Root Endpoint
+@app.get("/")
+async def root():
+    return {
+        "status": "online",
+        "service": "ASPHR Backend",
+        "message": "Backend is running successfully"
+    }
+
 # Include Routers
 app.include_router(health.router)
 app.include_router(geocode.router)
@@ -104,5 +113,6 @@ app.include_router(custom_db.router)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 7860))
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=True)
 

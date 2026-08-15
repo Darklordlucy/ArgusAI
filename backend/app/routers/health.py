@@ -15,6 +15,6 @@ async def health_check(db: AsyncSession = Depends(get_db)):
         db_status = f"disconnected: {str(e)}"
     
     return {
-        "status": "ok",
+        "status": "healthy",
         "database": db_status
     }
