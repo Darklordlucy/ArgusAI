@@ -23,7 +23,8 @@ class SegmentHazard(Base):
     __tablename__ = "segment_hazards"
 
     id = Column(Integer, primary_key=True, index=True)
-    segment_id = Column(Integer, ForeignKey("road_segments.id", ondelete="CASCADE"), index=True)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
     hazard_score = Column(Float, nullable=False)
     hazard_type = Column(String(50))
     confidence = Column(Float)

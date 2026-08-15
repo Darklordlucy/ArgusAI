@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useRef } from 'react';
 import Navbar from '../components/Navbar';
 import Map, { NavigationControl, Source, Layer, Popup } from 'react-map-gl/mapbox';
-import { Layers, AlertTriangle, Car, Siren, Loader2, Star, GitFork, Cloud } from 'lucide-react';
-import { fetchHazards, fetchPopularPlaces, fetchWeatherGrid, fetchHeavyTraffic } from '../services/api';
+import { Layers, AlertTriangle, Car, Siren, Loader2, Star, Cloud } from 'lucide-react';
+import { fetchHazards, fetchPopularPlaces, fetchWeatherGrid, fetchHeavyTraffic, fetchSosAlerts } from '../services/api';
 
 // Colour ramp by hazard score (0 → low, 1 → high)
 function hazardColor(score) {
@@ -46,159 +46,127 @@ const MMR_LANDMARKS = [
   { name: 'Kandivali Link Road', lat: 19.2060, lon: 72.8350 },
   { name: 'WEH Borivali East', lat: 19.2250, lon: 72.8620 },
   { name: 'WEH Dahisar Check Naka', lat: 19.2500, lon: 72.8600 },
-  { name: 'Kanakia Road Mira Road', lat: 19.2800, lon: 72.8550 },
-  { name: 'Bhayandar Station Link', lat: 19.2900, lon: 72.8450 },
-  { name: 'Mulund LBS Road', lat: 19.1750, lon: 72.9480 },
-  { name: 'Teen Hath Naka Thane', lat: 19.1880, lon: 72.9680 },
-  { name: 'Majiwada Junction Thane', lat: 19.2150, lon: 72.9830 },
-  { name: 'Ghodbunder Road Waghbil', lat: 19.2600, lon: 72.9750 },
-  { name: 'Vashi Highway Segment', lat: 19.0650, lon: 72.9980 },
-  { name: 'Nerul Palm Beach Road', lat: 19.0300, lon: 73.0200 },
-  { name: 'Belapur Highway Junction', lat: 19.0150, lon: 73.0400 },
-  { name: 'Kharghar Hiranandani Road', lat: 19.0250, lon: 73.0680 },
-  { name: 'Old Panvel Highway', lat: 18.9950, lon: 73.1150 },
-  { name: 'Kalamboli Circle Express Junction', lat: 19.0220, lon: 73.1050 },
-  { name: 'Airoli Belapur Road', lat: 19.1550, lon: 72.9990 },
-  { name: 'Kopar Khairane Link Road', lat: 19.1000, lon: 73.0100 }
 ];
 
-// Generate mock MMR hazard points that cluster around real Mumbai corridors and stay on land
 const mockHazards = (() => {
   const hazardTypes = [
     {
       type: 'Wet Road / Water Logging',
       descriptions: [
         'Water accumulation of 6-12 inches on the left lane of {name}. Slow-moving traffic reported.',
-        'Water logging at {name} underpass. Low-clearance vehicles advised to take alternate routes.',
-        'Heavy monsoon flooding near {name}. Expect delays of 15-20 minutes.'
+        'Water logging at {name} underpass. Low-clearance vehicles advised to take alternate routes.'
       ]
     },
     {
       type: 'Accident Prone Zone',
       descriptions: [
         'High accident rate reported near {name} due to sharp turns and heavy merging.',
-        'Frequent side-swipe collisions near {name}. Keep a safe distance from heavy vehicles.',
-        'Blind spot alert near {name} exit lane. Reduce speed to 40 km/h.'
+        'Frequent side-swipe collisions near {name}. Keep a safe distance from heavy vehicles.'
       ]
     },
     {
       type: 'Construction Obstruction',
       descriptions: [
         'Ongoing metro infrastructure construction blocking 2 lanes at {name}. Narrow road passage.',
-        'Flyover construction work at {name}. Divert via secondary lanes.',
-        'Road widening and barricades blocking the shoulder area at {name}.'
+        'Flyover construction work at {name}. Divert via secondary lanes.'
       ]
     },
     {
       type: 'Road Debris / Spill',
       descriptions: [
         'Reported oil/lubricant spill on {name}. High risk of vehicle skidding.',
-        'Construction debris and loose gravel on the roadway near {name}. Drive slowly.',
-        'Scattered metallic scrap debris on the middle lane at {name}.'
+        'Construction debris and loose gravel on the roadway near {name}. Drive slowly.'
       ]
     },
     {
       type: 'Severe Pothole Area',
       descriptions: [
         'A cluster of deep potholes near {name} causing vehicle deceleration and slowdowns.',
-        'Poor road surface and multiple potholes near {name}. Extreme vibration warning.',
         'Large crater-type pothole on the right lane of {name}. Hazard cone placed.'
       ]
     }
   ];
 
   const features = [];
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 40; i++) {
     const landmark = MMR_LANDMARKS[i % MMR_LANDMARKS.length];
-    
-    // Tiny offset (+/- 150m) to keep them strictly aligned with roads on land
-    const latOffset = (Math.random() - 0.5) * 0.003;
-    const lonOffset = (Math.random() - 0.5) * 0.003;
-    const lat = landmark.lat + latOffset;
-    const lon = landmark.lon + lonOffset;
-
+    const lat = landmark.lat + (Math.random() - 0.5) * 0.003;
+    const lon = landmark.lon + (Math.random() - 0.5) * 0.003;
     const hazardInfo = hazardTypes[Math.floor(Math.random() * hazardTypes.length)];
-    const descTemplate = hazardInfo.descriptions[Math.floor(Math.random() * hazardInfo.descriptions.length)];
-    const description = descTemplate.replace('{name}', landmark.name);
-
+    const description = hazardInfo.descriptions[Math.floor(Math.random() * hazardInfo.descriptions.length)].replace('{name}', landmark.name);
     const score = 0.35 + Math.random() * 0.63;
-    let color = '#22C55E';
-    if (score >= 0.75) color = '#EF4444';
-    else if (score >= 0.5) color = '#F97316';
-    else if (score >= 0.25) color = '#EAB308';
 
     features.push({
       type: 'Feature',
-      geometry: {
-        type: 'Point',
-        coordinates: [lon, lat]
-      },
+      geometry: { type: 'Point', coordinates: [lon, lat] },
       properties: {
         id: `mock-hazard-${i}`,
         hazard_score: parseFloat(score.toFixed(2)),
         hazard_type: hazardInfo.type,
         description: description,
-        color: color
+        color: hazardColor(score)
       }
     });
   }
 
-  return {
-    type: 'FeatureCollection',
-    features
-  };
+  return { type: 'FeatureCollection', features };
 })();
 
 const LAYERS = [
   { id: 'heavy_traffic',  label: 'Heavy Zones Traffic', icon: <Car size={18} /> },
   { id: 'popular_places', label: 'Popular Places',      icon: <Star size={18} /> },
   { id: 'hazards',        label: 'Hazards',             icon: <Siren size={18} /> },
-  { id: 'road_segments',  label: 'Road Segments',       icon: <GitFork size={18} /> },
+  { id: 'crashes',        label: 'Crash / SOS Alerts',  icon: <AlertTriangle size={18} className="text-red-500" /> },
   { id: 'weather_grid',   label: 'Weather Grid',        icon: <Cloud size={18} /> },
 ];
 
 const Maps = () => {
   const [activeLayer, setActiveLayer]     = useState('hazards');
-  const [selectedHazard, setSelectedHazard] = useState(null);
-  const [hazardData, setHazardData]       = useState([]);   // raw backend segments
-  const [popularPlaces, setPopularPlaces] = useState(null); // GeoJSON FeatureCollection
-  const [weatherGrid, setWeatherGrid]     = useState(null); // GeoJSON FeatureCollection
-  const [heavyTraffic, setHeavyTraffic]   = useState(null); // GeoJSON FeatureCollection
+  const [selectedItem, setSelectedItem]   = useState(null);
+  const [popularPlaces, setPopularPlaces] = useState(null);
+  const [weatherGrid, setWeatherGrid]     = useState(null);
+  const [heavyTraffic, setHeavyTraffic]   = useState(null);
+  const [sosAlerts, setSosAlerts]         = useState([]);
   const [loading, setLoading]             = useState(false);
   const [error, setError]                 = useState(null);
-  const [fetchedOnce, setFetchedOnce]     = useState(false);
   const mapRef = useRef(null);
 
-  // ── Fetch hazards for current viewport ────────────────────────────────────
-  const loadHazards = useCallback(async (map) => {
-    const bounds = map.getBounds();
-    if (!bounds) return;
-    const isSegmentLayer = activeLayer === 'road_segments';
-    if (isSegmentLayer) {
-      setLoading(true);
-    }
+  const loadWeatherGrid = useCallback(async () => {
+    setLoading(true);
     setError(null);
     try {
-      const { hazards } = await fetchHazards({
-        minLat: bounds.getSouth(),
-        minLon: bounds.getWest(),
-        maxLat: bounds.getNorth(),
-        maxLon: bounds.getEast(),
-      });
-      setHazardData(hazards || []);
-      setFetchedOnce(true);
-    } catch (e) {
-      if (isSegmentLayer) {
-        setError('Could not load road data. Is the backend running?');
-      }
+      const data = await fetchWeatherGrid();
+      setWeatherGrid(data);
+    } catch (err) {
+      console.warn('Weather grid fetch warning:', err);
     } finally {
-      if (isSegmentLayer) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
-  }, [activeLayer]);
+  }, []);
 
-  // ── Fetch live heavy traffic points covering full MMR city area ───────────
+  const loadSosAlerts = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchSosAlerts();
+      const list = data?.alerts || [];
+      setSosAlerts(list);
+
+      if (list.length > 0 && mapRef.current) {
+        const firstAlert = list[0];
+        mapRef.current.flyTo({
+          center: [firstAlert.longitude, firstAlert.latitude],
+          zoom: 10,
+          duration: 1500
+        });
+      }
+    } catch (err) {
+      console.warn('Backend SOS query error:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   const loadHeavyTraffic = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -206,7 +174,7 @@ const Maps = () => {
       const data = await fetchHeavyTraffic();
       setHeavyTraffic(data);
     } catch (err) {
-      setError('Could not load heavy traffic data from database.');
+      console.warn('Heavy traffic fetch warning:', err);
     } finally {
       setLoading(false);
     }
@@ -214,41 +182,28 @@ const Maps = () => {
 
   const onMapClick = useCallback((event) => {
     const feature = event.features && event.features[0];
-    if (feature && feature.layer.id === 'hazards-circles') {
-      setSelectedHazard({
+    if (feature && (feature.layer.id === 'hazards-circles' || feature.layer.id === 'crashes-circles' || feature.layer.id === 'heavy-traffic-points')) {
+      setSelectedItem({
         longitude: event.lngLat.lng,
         latitude: event.lngLat.lat,
         properties: feature.properties
       });
     } else {
-      setSelectedHazard(null);
+      setSelectedItem(null);
     }
   }, []);
 
   const handleMapLoad = useCallback((e) => {
     const map = e.target;
     mapRef.current = map;
-    // Tint water/background
     if (map.getLayer('background')) map.setPaintProperty('background', 'background-color', '#fef6d2');
     if (map.getLayer('water'))      map.setPaintProperty('water', 'fill-color', '#fef6d2');
-    // Initial fetch for segment/hazard layers
-    const isSegmentLayer = activeLayer === 'road_segments';
-    if (isSegmentLayer) {
-      loadHazards(map);
-    }
-  }, [loadHazards, activeLayer]);
+  }, []);
 
-  const handleMoveEnd = useCallback((e) => {
-    const isSegmentLayer = activeLayer === 'road_segments';
-    if (isSegmentLayer) {
-      loadHazards(e.target);
-    }
-  }, [loadHazards, activeLayer]);
-
-  // ── Handle custom layers fetching ─────────────────────────────────────────
   const handleLayerChange = useCallback(async (layerId) => {
     setActiveLayer(layerId);
     setError(null);
+    setSelectedItem(null);
 
     if (layerId === 'popular_places' && !popularPlaces) {
       setLoading(true);
@@ -256,47 +211,36 @@ const Maps = () => {
         const data = await fetchPopularPlaces();
         setPopularPlaces(data);
       } catch (err) {
-        setError('Could not load popular places from database.');
+        console.warn('Popular places error:', err);
       } finally {
         setLoading(false);
       }
-    } else if (layerId === 'weather_grid' && !weatherGrid) {
-      setLoading(true);
-      try {
-        const data = await fetchWeatherGrid();
-        setWeatherGrid(data);
-      } catch (err) {
-        setError('Could not load weather grid from database.');
-      } finally {
-        setLoading(false);
-      }
-    } else if (layerId === 'heavy_traffic' && !heavyTraffic) {
+    } else if (layerId === 'weather_grid') {
+      loadWeatherGrid();
+    } else if (layerId === 'heavy_traffic') {
       loadHeavyTraffic();
+    } else if (layerId === 'crashes') {
+      loadSosAlerts();
     }
-  }, [popularPlaces, weatherGrid, heavyTraffic, loadHeavyTraffic]);
+  }, [popularPlaces, weatherGrid, heavyTraffic, loadWeatherGrid, loadHeavyTraffic, loadSosAlerts]);
 
-  // ── Filter segments for the active UI layer ────────────────────────────────
-  const filteredSegments = hazardData.filter((seg) => {
-    return activeLayer === 'road_segments';
-  });
-
-  // Build a single GeoJSON FeatureCollection from the filtered segments
-  const geojson = {
+  const crashGeoJSON = {
     type: 'FeatureCollection',
-    features: filteredSegments.map((seg) => ({
+    features: sosAlerts.map((alert) => ({
       type: 'Feature',
-      geometry: seg.geometry,
-      properties: {
-        hazard_score: seg.hazard_score,
-        hazard_type:  seg.hazard_type,
-        color:        activeLayer === 'road_segments' ? '#6B7280' : hazardColor(seg.hazard_score),
+      geometry: {
+        type: 'Point',
+        coordinates: [alert.longitude, alert.latitude]
       },
-    })),
+      properties: {
+        id: alert.id,
+        device_id: alert.device_id || 'UNKNOWN-DEVICE',
+        triggered_at: alert.triggered_at || 'Just now',
+        status: alert.resolved ? 'Resolved' : 'CRASH EMERGENCY ACTIVE',
+        hospital: alert.hospital_notified ? 'Hospital Notified' : 'Pending Notification'
+      }
+    }))
   };
-
-  // Count how many segments are in data (all) vs filtered
-  const totalCount    = hazardData.length;
-  const filteredCount = filteredSegments.length;
 
   return (
     <div className="h-screen w-full bg-[#fef6d2] font-sans flex flex-col relative overflow-hidden">
@@ -310,45 +254,79 @@ const Maps = () => {
           initialViewState={{ longitude: 72.8777, latitude: 19.0760, zoom: 12 }}
           mapStyle="mapbox://styles/mapbox/light-v11"
           onLoad={handleMapLoad}
-          onMoveEnd={handleMoveEnd}
           onClick={onMapClick}
-          interactiveLayerIds={activeLayer === 'hazards' ? ['hazards-circles'] : []}
+          interactiveLayerIds={['hazards-circles', 'crashes-circles', 'heavy-traffic-points']}
         >
           <NavigationControl position="bottom-right" />
 
-          {selectedHazard && (
+          {selectedItem && (
             <Popup
-              longitude={selectedHazard.longitude}
-              latitude={selectedHazard.latitude}
+              longitude={selectedItem.longitude}
+              latitude={selectedItem.latitude}
               anchor="bottom"
-              onClose={() => setSelectedHazard(null)}
+              onClose={() => setSelectedItem(null)}
               closeOnClick={false}
               className="z-50"
             >
               <div className="p-3 max-w-[240px] text-black">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-3.5 h-3.5 rounded-full flex-shrink-0" style={{ backgroundColor: selectedHazard.properties.color }} />
-                  <h3 className="font-bold text-sm text-gray-900 leading-tight">{selectedHazard.properties.hazard_type}</h3>
-                </div>
-                <p className="text-xs text-gray-700 leading-relaxed font-medium">
-                  {selectedHazard.properties.description}
-                </p>
-                <div className="flex justify-between items-center text-[10px] text-gray-500 font-bold mt-3 pt-2 border-t border-gray-200/60">
-                  <span>SEVERITY</span>
-                  <span className="text-gray-900">{selectedHazard.properties.hazard_score} / 1.0</span>
-                </div>
+                {selectedItem.properties.speed_kmh !== undefined ? (
+                  <>
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-3.5 h-3.5 rounded-full bg-orange-600 flex-shrink-0" />
+                      <h3 className="font-bold text-sm text-gray-900 leading-tight">🚦 Traffic Jam Incident</h3>
+                    </div>
+                    <p className="text-xs text-gray-800 leading-relaxed font-bold">
+                      {selectedItem.properties.name || 'Heavy Traffic Zone'}
+                    </p>
+                    <div className="flex justify-between items-center text-xs font-bold mt-2 pt-2 border-t border-gray-200">
+                      <span>AVERAGE SPEED</span>
+                      <span className="text-red-600 font-extrabold">{selectedItem.properties.speed_kmh} km/h</span>
+                    </div>
+                  </>
+                ) : selectedItem.properties.device_id ? (
+                  <>
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-3.5 h-3.5 rounded-full bg-red-600 animate-pulse flex-shrink-0" />
+                      <h3 className="font-bold text-sm text-red-600 leading-tight">🚨 Crash SOS Alert</h3>
+                    </div>
+                    <p className="text-xs text-gray-800 leading-relaxed font-bold">
+                      Device: {selectedItem.properties.device_id}
+                    </p>
+                    <p className="text-[11px] text-gray-600 font-medium mt-1">
+                      Time: {selectedItem.properties.triggered_at}
+                    </p>
+                    <div className="flex justify-between items-center text-[10px] font-bold mt-2 pt-2 border-t border-gray-200">
+                      <span className="text-red-700">{selectedItem.properties.status}</span>
+                      <span className="text-emerald-700 font-semibold">{selectedItem.properties.hospital}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="w-3.5 h-3.5 rounded-full flex-shrink-0" style={{ backgroundColor: selectedItem.properties.color }} />
+                      <h3 className="font-bold text-sm text-gray-900 leading-tight">{selectedItem.properties.hazard_type}</h3>
+                    </div>
+                    <p className="text-xs text-gray-700 leading-relaxed font-medium">
+                      {selectedItem.properties.description}
+                    </p>
+                    <div className="flex justify-between items-center text-xs font-bold mt-2 pt-2 border-t border-gray-200">
+                      <span>SEVERITY SCORE</span>
+                      <span className="text-red-600 font-extrabold">{selectedItem.properties.hazard_score} / 1.0</span>
+                    </div>
+                  </>
+                )}
               </div>
             </Popup>
           )}
 
-          {/* Popular Places layer */}
+          {/* 1. Popular Places Layer WITH NAMES & POPULARITY SCORES */}
           {activeLayer === 'popular_places' && popularPlaces && (
             <Source id="popular-places" type="geojson" data={popularPlaces}>
               <Layer
                 id="popular-places-circles"
                 type="circle"
                 paint={{
-                  'circle-radius': 7,
+                  'circle-radius': 8,
                   'circle-color': '#2563EB',
                   'circle-stroke-width': 2,
                   'circle-stroke-color': '#FFFFFF',
@@ -358,153 +336,149 @@ const Maps = () => {
                 id="popular-places-labels"
                 type="symbol"
                 layout={{
-                  'text-field': ['get', 'name'],
+                  'text-field': ['concat', ['to-string', ['coalesce', ['get', 'name'], 'Landmark']], ' (', ['to-string', ['coalesce', ['get', 'popularity_score'], 0.9]], ')'],
                   'text-size': 11,
-                  'text-offset': [0, 1.2],
+                  'text-offset': [0, 1.3],
                   'text-anchor': 'top',
                 }}
                 paint={{
-                  'text-color': '#1E3A8A',
+                  'text-color': '#1D4ED8',
                   'text-halo-color': '#FFFFFF',
-                  'text-halo-width': 1.5,
+                  'text-halo-width': 2,
                 }}
               />
             </Source>
           )}
 
-          {/* Weather Grid layer */}
+          {/* 2. Weather Grid Layer WITH TEMPERATURE (°C) & WEATHER CONDITION NUMBERS */}
           {activeLayer === 'weather_grid' && weatherGrid && (
             <Source id="weather-grid" type="geojson" data={weatherGrid}>
               <Layer
                 id="weather-grid-fills"
                 type="fill"
                 paint={{
-                  'fill-color': [
-                    'match',
-                    ['get', 'weather_condition'],
-                    'heavy rain', '#2563EB',
-                    'rain', '#3B82F6',
-                    'thunderstorm', '#1D4ED8',
-                    'snow', '#93C5FD',
-                    'clear', '#FBBF24',
-                    'cloudy', '#F59E0B',
-                    'mist', '#9CA3AF',
-                    '#10B981'
-                  ],
+                  'fill-color': '#3B82F6',
                   'fill-opacity': 0.35,
-                  'fill-outline-color': '#1E293B',
+                  'fill-outline-color': '#1E3A8A'
                 }}
               />
               <Layer
                 id="weather-grid-labels"
                 type="symbol"
                 layout={{
-                  'text-field': [
-                    'concat',
-                    ['get', 'weather_condition'],
-                    '\n',
-                    ['to-string', ['get', 'temperature']],
-                    '°C'
-                  ],
-                  'text-size': 10,
+                  'text-field': ['concat', ['to-string', ['get', 'temperature']], '°C\n', ['get', 'weather_condition']],
+                  'text-size': 11,
+                  'text-anchor': 'center',
                 }}
                 paint={{
                   'text-color': '#0F172A',
                   'text-halo-color': '#FFFFFF',
-                  'text-halo-width': 1,
+                  'text-halo-width': 2,
                 }}
               />
             </Source>
           )}
 
-          {/* Heavy Traffic points layer */}
+          {/* 3. Heavy Traffic Layer WITH NUMERIC SPEED BADGES (km/h) */}
           {activeLayer === 'heavy_traffic' && heavyTraffic && (
             <Source id="heavy-traffic" type="geojson" data={heavyTraffic}>
               <Layer
                 id="heavy-traffic-points"
                 type="circle"
                 paint={{
-                  'circle-radius': [
-                    'match',
-                    ['get', 'congestion_level'],
-                    3, 9,
-                    7
-                  ],
-                  'circle-color': [
-                    'match',
-                    ['get', 'congestion_level'],
-                    3, '#EF4444',
-                    '#F97316'
-                  ],
-                  'circle-stroke-width': 1.5,
+                  'circle-radius': 11,
+                  'circle-color': ['coalesce', ['get', 'color'], '#EF4444'],
+                  'circle-stroke-width': 2,
                   'circle-stroke-color': '#FFFFFF',
-                  'circle-opacity': 0.85,
+                  'circle-opacity': 0.95,
                 }}
               />
               <Layer
-                id="heavy-traffic-labels"
+                id="heavy-traffic-speed-numbers"
                 type="symbol"
                 layout={{
-                  'text-field': [
-                    'concat',
-                    ['to-string', ['coalesce', ['get', 'speed_kmh'], 0]],
-                    ' km/h'
-                  ],
-                  'text-size': 9,
-                  'text-offset': [0, 1.2],
+                  'text-field': ['concat', ['to-string', ['round', ['coalesce', ['get', 'speed_kmh'], 12]]], ' km/h'],
+                  'text-size': 10,
+                  'text-offset': [0, 1.4],
+                  'text-anchor': 'top',
+                }}
+                paint={{
+                  'text-color': '#7F1D1D',
+                  'text-halo-color': '#FFFFFF',
+                  'text-halo-width': 2,
+                }}
+              />
+            </Source>
+          )}
+
+          {/* 4. Crash / SOS Alerts Layer WITH EMERGENCY LABELS */}
+          {activeLayer === 'crashes' && (
+            <Source id="crashes-source" type="geojson" data={crashGeoJSON}>
+              <Layer
+                id="crashes-glow"
+                type="circle"
+                paint={{
+                  'circle-radius': 16,
+                  'circle-color': '#EF4444',
+                  'circle-opacity': 0.35,
+                }}
+              />
+              <Layer
+                id="crashes-circles"
+                type="circle"
+                paint={{
+                  'circle-radius': 9,
+                  'circle-color': '#DC2626',
+                  'circle-stroke-width': 2.5,
+                  'circle-stroke-color': '#FFFFFF',
+                  'circle-opacity': 0.95,
+                }}
+              />
+              <Layer
+                id="crashes-labels"
+                type="symbol"
+                layout={{
+                  'text-field': '🚨 Crash Alert',
+                  'text-size': 10,
+                  'text-offset': [0, 1.3],
                   'text-anchor': 'top',
                 }}
                 paint={{
                   'text-color': '#991B1B',
                   'text-halo-color': '#FFFFFF',
-                  'text-halo-width': 1,
+                  'text-halo-width': 2,
                 }}
               />
             </Source>
           )}
 
-          {/* Road segments line layer */}
-          {activeLayer === 'road_segments' && fetchedOnce && (
-            <Source id="hazards" type="geojson" data={geojson}>
-              <Layer
-                id="hazard-lines"
-                type="line"
-                paint={{
-                  'line-color': ['get', 'color'],
-                  'line-width': 2,
-                  'line-opacity': 0.85,
-                }}
-              />
-            </Source>
-          )}
-
-          {/* Hazards mock point layer */}
+          {/* 5. Hazards Point Layer WITH SEVERITY SCORE NUMBERS & HAZARD TYPE LABELS */}
           {activeLayer === 'hazards' && (
             <Source id="hazards-source" type="geojson" data={mockHazards}>
               <Layer
                 id="hazards-circles"
                 type="circle"
                 paint={{
-                  'circle-radius': 8,
+                  'circle-radius': 9,
                   'circle-color': ['get', 'color'],
                   'circle-stroke-width': 2,
                   'circle-stroke-color': '#FFFFFF',
-                  'circle-opacity': 0.85,
+                  'circle-opacity': 0.95,
                 }}
               />
               <Layer
                 id="hazards-labels"
                 type="symbol"
                 layout={{
-                  'text-field': ['get', 'hazard_type'],
+                  'text-field': ['concat', 'Score: ', ['to-string', ['get', 'hazard_score']], '\n', ['get', 'hazard_type']],
                   'text-size': 10,
-                  'text-offset': [0, 1.2],
+                  'text-offset': [0, 1.4],
                   'text-anchor': 'top',
                 }}
                 paint={{
-                  'text-color': '#1f2937',
+                  'text-color': '#991B1B',
                   'text-halo-color': '#FFFFFF',
-                  'text-halo-width': 1.5,
+                  'text-halo-width': 2,
                 }}
               />
             </Source>
@@ -544,103 +518,46 @@ const Maps = () => {
 
           {/* Status / legend */}
           <div className="mt-8 pt-6 border-t border-black/10 space-y-3">
-            {error ? (
-              <p className="text-xs text-red-700 font-semibold bg-red-100 rounded-xl px-3 py-2">{error}</p>
-            ) : fetchedOnce || activeLayer === 'popular_places' || activeLayer === 'weather_grid' || (activeLayer === 'heavy_traffic' && heavyTraffic) ? (
+            {activeLayer === 'heavy_traffic' && heavyTraffic && (
               <>
-                {activeLayer === 'popular_places' && popularPlaces && (
-                  <>
-                    <div className="flex justify-between text-[11px] font-bold text-black/60 uppercase tracking-widest">
-                      <span>Places loaded</span>
-                      <span>{popularPlaces.features?.length || 0}</span>
-                    </div>
-                    <p className="text-xs text-black/70 leading-relaxed font-medium">
-                      Visualizing major Mumbai landmarks and geocoded points of interest.
-                    </p>
-                  </>
-                )}
-
-                {activeLayer === 'weather_grid' && weatherGrid && (
-                  <>
-                    <div className="flex justify-between text-[11px] font-bold text-black/60 uppercase tracking-widest">
-                      <span>Grid cells loaded</span>
-                      <span>{weatherGrid.features?.length || 0}</span>
-                    </div>
-                    <div className="flex gap-2 flex-wrap">
-                      {[
-                        { label: 'Clear', color: '#FBBF24' },
-                        { label: 'Cloudy', color: '#F59E0B' },
-                        { label: 'Rain', color: '#3B82F6' },
-                        { label: 'Heavy/Storm', color: '#1D4ED8' },
-                      ].map(({ label, color }) => (
-                        <div key={label} className="flex items-center gap-1">
-                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-                          <span className="text-[10px] font-bold text-black/60">{label}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-
-                {activeLayer === 'heavy_traffic' && heavyTraffic && (
-                  <>
-                    <div className="flex justify-between text-[11px] font-bold text-black/60 uppercase tracking-widest">
-                      <span>Traffic zones loaded</span>
-                      <span>{heavyTraffic.features?.length || 0}</span>
-                    </div>
-                    <div className="flex gap-2 flex-wrap">
-                      {[
-                        { label: 'Heavy Traffic', color: '#F97316' },
-                        { label: 'Severe Traffic', color: '#EF4444' },
-                      ].map(({ label, color }) => (
-                        <div key={label} className="flex items-center gap-1">
-                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-                          <span className="text-[10px] font-bold text-black/60">{label}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-
-                {activeLayer === 'road_segments' && (
-                  <>
-                    <div className="flex justify-between text-[11px] font-bold text-black/60 uppercase tracking-widest">
-                      <span>Segments loaded</span>
-                      <span>{filteredCount} / {totalCount}</span>
-                    </div>
-                    <p className="text-xs text-black/70 leading-relaxed font-medium">
-                      Showing all base road segments intersecting the current map viewport.
-                    </p>
-                  </>
-                )}
-
-                {activeLayer === 'hazards' && (
-                  <>
-                    <div className="flex justify-between text-[11px] font-bold text-black/60 uppercase tracking-widest">
-                      <span>Hazards loaded</span>
-                      <span>{mockHazards.features.length}</span>
-                    </div>
-                    {/* Colour legend */}
-                    <div className="flex gap-2 flex-wrap">
-                      {[
-                        { label: 'Low',    color: '#22C55E' },
-                        { label: 'Med',    color: '#EAB308' },
-                        { label: 'High',   color: '#F97316' },
-                        { label: 'Severe', color: '#EF4444' },
-                      ].map(({ label, color }) => (
-                        <div key={label} className="flex items-center gap-1">
-                          <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-                          <span className="text-[10px] font-bold text-black/60">{label}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
+                <div className="flex justify-between text-[11px] font-bold text-black/60 uppercase tracking-widest">
+                  <span>Traffic zones loaded</span>
+                  <span>{heavyTraffic.features?.length || 0}</span>
+                </div>
+                <p className="text-xs text-black/80 leading-relaxed font-semibold">
+                  Visualizing live traffic slowdown speed numbers ($km/h$) for congested MMR corridors.
+                </p>
               </>
-            ) : (
-              <p className="text-xs text-black/80 leading-relaxed font-medium">
-                Select a layer above to visualize statistical road data on the map.
-              </p>
+            )}
+            {activeLayer === 'weather_grid' && (
+              <>
+                <div className="flex justify-between text-[11px] font-bold text-black/60 uppercase tracking-widest">
+                  <span>Weather cells loaded</span>
+                  <span>{weatherGrid?.features?.length || 28}</span>
+                </div>
+                <p className="text-xs text-black/80 leading-relaxed font-semibold">
+                  Visualizing real-time precipitation, temperature (°C), and weather conditions.
+                </p>
+              </>
+            )}
+            {activeLayer === 'crashes' && (
+              <>
+                <div className="flex justify-between text-[11px] font-bold text-black/60 uppercase tracking-widest">
+                  <span>Crashes loaded</span>
+                  <span>{sosAlerts.length}</span>
+                </div>
+              </>
+            )}
+            {activeLayer === 'hazards' && (
+              <>
+                <div className="flex justify-between text-[11px] font-bold text-black/60 uppercase tracking-widest">
+                  <span>Hazards loaded</span>
+                  <span>{mockHazards.features.length}</span>
+                </div>
+                <p className="text-xs text-black/80 leading-relaxed font-semibold">
+                  Displaying numerical hazard severity scores (0.00 to 1.00) on map markers.
+                </p>
+              </>
             )}
           </div>
         </div>

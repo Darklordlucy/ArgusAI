@@ -20,11 +20,6 @@ async function request(path, options = {}) {
 
 // ─── Hazards ────────────────────────────────────────────────────────────────
 
-/**
- * Fetch hazard segments within a map viewport bounding box.
- * @param {object} bounds - { minLat, minLon, maxLat, maxLon }
- * @returns {Promise<{ hazards: Array }>}
- */
 export async function fetchHazards({ minLat, minLon, maxLat, maxLon }) {
   const params = new URLSearchParams({
     min_lat: minLat,
@@ -37,22 +32,11 @@ export async function fetchHazards({ minLat, minLon, maxLat, maxLon }) {
 
 // ─── Geocoding ───────────────────────────────────────────────────────────────
 
-/**
- * Forward geocode a text query to coordinates.
- * @param {string} query
- * @returns {Promise<{ query: string, longitude: number, latitude: number }>}
- */
 export async function forwardGeocode(query) {
   const params = new URLSearchParams({ query });
   return request(`/api/v1/geocode/forward?${params}`);
 }
 
-/**
- * Reverse geocode coordinates to an address.
- * @param {number} lat
- * @param {number} lon
- * @returns {Promise<object>}
- */
 export async function reverseGeocode(lat, lon) {
   const params = new URLSearchParams({ lat, lon });
   return request(`/api/v1/geocode/reverse?${params}`);
@@ -60,24 +44,6 @@ export async function reverseGeocode(lat, lon) {
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
-/**
- * Compute a route between two coordinates.
- * @param {object} payload
- * @param {object} payload.origin       - { lat, lon }
- * @param {object} payload.destination  - { lat, lon }
- * @param {string} payload.route_type   - 'fastest'|'safest'|'straightest'|'popular'
- * @param {string} payload.vehicle_type - 'bike'|'car'|'truck'|'supercar'
- * @param {boolean} payload.avoid_tolls
- * @returns {Promise<{
- *   route_id: string,
- *   geometry: { type: string, coordinates: Array },
- *   distance_km: number,
- *   duration_min: number,
- *   hazard_score_avg: number,
- *   weather_alerts: Array<string>,
- *   instructions: Array<object>
- * }>}
- */
 export async function computeRoute({
   origin,
   destination,
@@ -91,9 +57,6 @@ export async function computeRoute({
   });
 }
 
-/**
- * Submit route feedback to backend database.
- */
 export async function submitRouteFeedback(payload) {
   return request('/api/v1/routes/feedback', {
     method: 'POST',
@@ -107,18 +70,89 @@ export async function checkHealth() {
   return request('/health');
 }
 
-// ─── Custom DB Connectivity (via Vite middleware) ───────────────────────────
+// ─── Custom DB & IoT Endpoints ────────────────────────────────────────────────
 
 export async function fetchPopularPlaces() {
-  return request('/api/v1/custom-db/popular_places');
+  try {
+    const data = await request('/api/v1/custom-db/popular_places');
+    if (data && data.features && data.features.length > 0) return data;
+    throw new Error('Empty popular places');
+  } catch (e) {
+    const res = await fetch('https://darklord11-asphr-backend.hf.space/api/v1/custom-db/popular_places');
+    return res.json();
+  }
 }
 
 export async function fetchWeatherGrid() {
-  return request('/api/v1/custom-db/weather_grid');
+  try {
+    const data = await request('/api/v1/custom-db/weather_grid');
+    if (data && data.features && data.features.length > 0) return data;
+    throw new Error('No weather grid features in local DB');
+  } catch (e) {
+    try {
+      const res = await fetch('https://darklord11-asphr-backend.hf.space/api/v1/custom-db/weather_grid');
+      const data = await res.json();
+      if (data && data.features && data.features.length > 0) return data;
+    } catch (err) {}
+    
+    // Synthetic fallback weather grid polygons over Mumbai MMR region
+    return {
+      type: 'FeatureCollection',
+      features: [
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[[72.80, 18.90], [72.88, 18.90], [72.88, 19.05], [72.80, 19.05], [72.80, 18.90]]]
+          },
+          properties: { id: 1, weather_condition: 'rain', temperature: 28.5, humidity: 82.0 }
+        },
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[[72.88, 18.90], [72.96, 18.90], [72.96, 19.05], [72.88, 19.05], [72.88, 18.90]]]
+          },
+          properties: { id: 2, weather_condition: 'thunderstorm', temperature: 27.0, humidity: 89.0 }
+        },
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[[72.80, 19.05], [72.88, 19.05], [72.88, 19.20], [72.80, 19.20], [72.80, 19.05]]]
+          },
+          properties: { id: 3, weather_condition: 'heavy rain', temperature: 26.5, humidity: 91.0 }
+        },
+        {
+          type: 'Feature',
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[[72.88, 19.05], [72.96, 19.05], [72.96, 19.20], [72.88, 19.20], [72.88, 19.05]]]
+          },
+          properties: { id: 4, weather_condition: 'cloudy', temperature: 29.0, humidity: 78.0 }
+        }
+      ]
+    };
+  }
 }
 
 export async function fetchHeavyTraffic() {
-  return request('/api/v1/custom-db/heavy_traffic');
+  try {
+    return await request('/api/v1/custom-db/heavy_traffic');
+  } catch (e) {
+    const res = await fetch('https://darklord11-asphr-backend.hf.space/api/v1/custom-db/heavy_traffic');
+    return res.json();
+  }
 }
 
-
+export async function fetchSosAlerts() {
+  try {
+    const res = await request('/api/v1/iot/sos');
+    if (res && res.alerts && res.alerts.length > 0) return res;
+    throw new Error('Local DB returned no alerts');
+  } catch (e) {
+    // Fallback to deployed Hugging Face backend connected directly to live Supabase DB
+    const res = await fetch('https://darklord11-asphr-backend.hf.space/api/v1/iot/sos');
+    return res.json();
+  }
+}

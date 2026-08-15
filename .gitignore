@@ -1,15 +1,33 @@
+# Dependencies
+node_modules/
+mobile/node_modules/
+frontend/node_modules/
+dist/
+mobile/dist/
+frontend/dist/
+
 # Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .pytest_cache/
+.venv/
+venv/
+env/
 
-# Large model files to be pushed later via Git LFS
-
-# Cache folders
+# Large model files / cache folders
 backend/cache/
+backend/data/map_cache/
 cache/
 
-# Env files
+# Environment files
 .env
+.env.local
+.env.*.local
+
+# IDE & OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

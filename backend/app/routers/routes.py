@@ -70,43 +70,38 @@ async def get_hazards_heatmap(
         # Spatial query to fetch road segments intersecting with the bounding box, joined with their latest hazards
         query = text("""
             SELECT 
-                rs.id AS segment_id,
-                ST_AsText(rs.geometry) AS geom_wkt,
-                sh.hazard_score,
-                sh.hazard_type
-            FROM road_segments rs
-            LEFT JOIN LATERAL (
-                SELECT hazard_score, hazard_type
-                FROM segment_hazards
-                WHERE segment_id = rs.id
-                ORDER BY recorded_at DESC
-                LIMIT 1
-            ) sh ON TRUE
-            WHERE ST_Intersects(rs.geometry, ST_GeomFromText(:bbox, 4326))
+                id,
+                latitude,
+                longitude,
+                hazard_score,
+                hazard_type
+            FROM segment_hazards
+            WHERE latitude BETWEEN :min_lat AND :max_lat 
+              AND longitude BETWEEN :min_lon AND :max_lon
+            ORDER BY recorded_at DESC
             LIMIT 5000
         """)
         
-        result = await db.execute(query, {"bbox": bbox_wkt})
+        result = await db.execute(query, {
+            "min_lat": min_lat,
+            "min_lon": min_lon,
+            "max_lat": max_lat,
+            "max_lon": max_lon
+        })
         rows = result.fetchall()
         
         hazards_list = []
-        for segment_id, geom_wkt, hazard_score, hazard_type in rows:
-            if not geom_wkt:
+        for hid, lat, lon, hazard_score, hazard_type in rows:
+            if lat is None or lon is None:
                 continue
-                
-            # Parse WKT coordinates
-            coords_str = geom_wkt.replace("LINESTRING", "").replace("(", "").replace(")", "").strip()
-            coordinates = []
-            for pt in coords_str.split(","):
-                parts = pt.strip().split(" ")
-                if len(parts) >= 2:
-                    coordinates.append([float(parts[0]), float(parts[1])])
-                    
+
             hazards_list.append({
-                "segment_id": segment_id,
+                "id": hid,
+                "latitude": float(lat),
+                "longitude": float(lon),
                 "geometry": {
-                    "type": "LineString",
-                    "coordinates": coordinates
+                    "type": "Point",
+                    "coordinates": [float(lon), float(lat)]
                 },
                 "hazard_score": float(hazard_score or 0.0),
                 "hazard_type": hazard_type or "unknown"

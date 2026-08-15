@@ -37,15 +37,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket_manager.send_personal_message({"type": "pong"}, websocket)
 
             elif msg_type == "report_hazard":
-                # Process a live hazard report from a client
-                segment_id = message.get("segment_id")
+                # Process a live hazard report from a client using latitude and longitude
+                latitude = message.get("latitude")
+                longitude = message.get("longitude")
                 hazard_type = message.get("hazard_type", "general")
                 hazard_score = message.get("hazard_score", 0.5)
                 expires_in_sec = message.get("expires_in_sec", 7200) # Default 2 hours
 
-                if not segment_id:
+                if latitude is None or longitude is None:
                     await websocket_manager.send_personal_message(
-                        {"type": "error", "message": "Missing 'segment_id'"}, websocket
+                        {"type": "error", "message": "Missing 'latitude' or 'longitude' coordinates"}, websocket
                     )
                     continue
 
@@ -61,22 +62,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 # Store hazard in database
                 async with AsyncSessionLocal() as db:
-                    # Optional: Verify segment exists
-                    segment_check = await db.execute(
-                        select(RoadSegment).where(RoadSegment.id == segment_id)
-                    )
-                    segment = segment_check.scalar_one_or_none()
-                    if not segment:
-                        await websocket_manager.send_personal_message(
-                            {"type": "error", "message": f"Segment ID {segment_id} not found"}, websocket
-                        )
-                        continue
-
                     now = datetime.datetime.utcnow()
                     expires_at = now + datetime.timedelta(seconds=expires_in_sec)
 
                     db_hazard = SegmentHazard(
-                        segment_id=segment_id,
+                        latitude=float(latitude),
+                        longitude=float(longitude),
                         hazard_score=hazard_score,
                         hazard_type=hazard_type,
                         confidence=1.0,
@@ -88,14 +79,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     await db.commit()
                     await db.refresh(db_hazard)
 
-                    logger.info(f"Persisted live hazard report: segment {segment_id}, type {hazard_type}, score {hazard_score}")
+                    logger.info(f"Persisted live hazard report: lat {latitude}, lon {longitude}, type {hazard_type}, score {hazard_score}")
 
                     # Broadcast the alert to all connected clients
                     alert_payload = {
                         "type": "hazard_alert",
                         "data": {
                             "id": db_hazard.id,
-                            "segment_id": segment_id,
+                            "latitude": db_hazard.latitude,
+                            "longitude": db_hazard.longitude,
                             "hazard_type": hazard_type,
                             "hazard_score": hazard_score,
                             "recorded_at": now.isoformat(),

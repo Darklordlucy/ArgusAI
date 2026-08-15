@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 
 const Logo = () => (
   <Link to="/" className="flex items-center">
@@ -19,22 +19,43 @@ const ButtonLogo = () => (
 );
 
 const Navbar = ({ theme = 'dark' }) => {
-  const isLight = theme === 'light';
-  // Force black text and larger font size
-  const linkClass = `transition-colors hover:text-brand-yellow text-brand-dark font-bold`;
+  const location = useLocation();
+
+  const navLinks = [
+    { path: '/', label: 'Home' },
+    { path: '/maps', label: 'Maps' },
+    { path: '/routes', label: 'Routes' },
+    { path: '/services', label: 'Services' },
+  ];
 
   return (
     <nav className="flex items-center justify-between px-10 py-3 fixed top-0 left-0 w-full z-50 bg-transparent">
-      <Logo isLight={isLight} />
+      <Logo />
       
-      <div className="hidden md:flex items-center space-x-10 text-lg">
-        <Link to="/" className={linkClass}>Home</Link>
-        <Link to="/maps" className={linkClass}>Maps</Link>
-        <Link to="/routes" className={linkClass}>Routes</Link>
-        <Link to="/services" className={linkClass}>Services</Link>
+      {/* Navbar Container with #fef6d2 background pill for high contrast & visibility */}
+      <div className="hidden md:flex items-center space-x-2 bg-[#fef6d2] px-4 py-2 rounded-full border border-amber-200/80 shadow-lg backdrop-blur-md">
+        {navLinks.map((link) => {
+          const isActive = location.pathname === link.path;
+          return (
+            <Link
+              key={link.path}
+              to={link.path}
+              className={`px-4 py-1.5 rounded-full text-base font-extrabold transition-all duration-200 ${
+                isActive
+                  ? 'bg-[#8f9d68] text-white shadow-sm'
+                  : 'text-slate-900 hover:text-[#8f9d68] hover:bg-white/60'
+              }`}
+            >
+              {link.label}
+            </Link>
+          );
+        })}
       </div>
 
-      <Link to="/routes" className="bg-[#0F2027] hover:bg-black text-white px-6 py-2.5 rounded-full font-sans font-medium text-sm flex items-center transition-all hover:scale-105 active:scale-95 shadow-xl border border-white/10">
+      <Link
+        to="/routes"
+        className="bg-[#0F2027] hover:bg-black text-white px-6 py-2.5 rounded-full font-sans font-semibold text-sm flex items-center transition-all hover:scale-105 active:scale-95 shadow-xl border border-white/10"
+      >
         <ButtonLogo />
         Start Your Journey
       </Link>
