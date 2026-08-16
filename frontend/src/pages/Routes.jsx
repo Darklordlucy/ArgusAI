@@ -98,6 +98,7 @@ const Routes = () => {
   // ── Selectors ────────────────────────────────────────────────────────────
   const [vehicle,    setVehicle]    = useState('car');
   const [routeType,  setRouteType]  = useState('fastest');
+  const [popularNotice, setPopularNotice] = useState(false);
 
   // ── Route result ─────────────────────────────────────────────────────────
   const [routeResult,   setRouteResult]   = useState(null);
@@ -419,9 +420,9 @@ const Routes = () => {
                     <div className="absolute left-3.5 top-7 bottom-7 w-0.5 bg-black/10 z-0" />
 
                     {/* Origin */}
-                    <div className="relative z-10" ref={originRef}>
+                    <div className={`relative transition-all duration-150 ${showOriginDrop ? 'z-30' : 'z-10'}`} ref={originRef}>
                       <div className={`flex items-center gap-3 bg-[#fef6d2]/30 p-3 rounded-2xl border transition-all
-                        ${showOriginDrop ? 'border-black/30 bg-[#fef6d2]/60' : 'border-black/5'}`}
+                        ${showOriginDrop ? 'border-black/30 bg-[#fef6d2]/90 shadow-md' : 'border-black/5'}`}
                       >
                         <div className="w-2.5 h-2.5 rounded-full bg-black shrink-0" />
                         <input
@@ -439,15 +440,15 @@ const Routes = () => {
                         )}
                       </div>
                       {showOriginDrop && originSuggestions.length > 0 && (
-                        <div className="absolute top-full left-0 right-0 mt-2 bg-[#fef6d2] rounded-xl shadow-xl border border-black/10 overflow-hidden z-50">
+                        <div className="absolute top-full left-0 right-0 mt-1.5 bg-[#fef6d2] rounded-2xl shadow-[0_15px_30px_rgba(0,0,0,0.25)] border border-black/15 overflow-hidden z-50">
                           {originSuggestions.map((s, i) => (
                             <div
                               key={i}
-                              className="px-4 py-3 hover:bg-black/5 cursor-pointer text-sm text-black font-medium transition-colors border-b border-black/5 last:border-0"
+                              className="px-4 py-3.5 hover:bg-black/10 cursor-pointer text-sm text-black font-semibold transition-colors border-b border-black/10 last:border-0 flex items-center gap-2"
                               onMouseDown={() => selectOrigin(s)}
                             >
-                              <MapPin size={12} className="inline mr-2 text-black/40" />
-                              {s.name}
+                              <MapPin size={14} className="shrink-0 text-red-600" />
+                              <span className="truncate">{s.name}</span>
                             </div>
                           ))}
                         </div>
@@ -455,9 +456,9 @@ const Routes = () => {
                     </div>
 
                     {/* Destination */}
-                    <div className="relative z-10" ref={destRef}>
+                    <div className={`relative transition-all duration-150 ${showDestDrop ? 'z-30' : 'z-0'}`} ref={destRef}>
                       <div className={`flex items-center gap-3 bg-[#fef6d2]/30 p-3 rounded-2xl border transition-all
-                        ${showDestDrop ? 'border-black/30 bg-[#fef6d2]/60' : 'border-black/5'}`}
+                        ${showDestDrop ? 'border-black/30 bg-[#fef6d2]/90 shadow-md' : 'border-black/5'}`}
                       >
                         <MapPin className="text-red-600 shrink-0" size={16} />
                         <input
@@ -475,15 +476,15 @@ const Routes = () => {
                         )}
                       </div>
                       {showDestDrop && destSuggestions.length > 0 && (
-                        <div className="absolute top-full left-0 right-0 mt-2 bg-[#fef6d2] rounded-xl shadow-xl border border-black/10 overflow-hidden z-50">
+                        <div className="absolute top-full left-0 right-0 mt-1.5 bg-[#fef6d2] rounded-2xl shadow-[0_15px_30px_rgba(0,0,0,0.25)] border border-black/15 overflow-hidden z-50">
                           {destSuggestions.map((s, i) => (
                             <div
                               key={i}
-                              className="px-4 py-3 hover:bg-black/5 cursor-pointer text-sm text-black font-medium transition-colors border-b border-black/5 last:border-0"
+                              className="px-4 py-3.5 hover:bg-black/10 cursor-pointer text-sm text-black font-semibold transition-colors border-b border-black/10 last:border-0 flex items-center gap-2"
                               onMouseDown={() => selectDest(s)}
                             >
-                              <MapPin size={12} className="inline mr-2 text-black/40" />
-                              {s.name}
+                              <MapPin size={14} className="shrink-0 text-red-600" />
+                              <span className="truncate">{s.name}</span>
                             </div>
                           ))}
                         </div>
@@ -525,22 +526,44 @@ const Routes = () => {
                         { id: 'fastest',     icon: <Zap size={16} />,        label: 'Fastest'     },
                         { id: 'safest',      icon: <Shield size={16} />,     label: 'Safest'      },
                         { id: 'straightest', icon: <ArrowRight size={16} />, label: 'Straightest' },
-                        { id: 'popular',     icon: <Star size={16} />,       label: 'Popular'     },
+                        { id: 'popular',     icon: <Star size={16} />,       label: 'Popular', isPopular: true },
                       ].map((rt) => (
                         <button
                           key={rt.id}
-                          onClick={() => setRouteType(rt.id)}
+                          title={rt.isPopular ? "Available soon" : ""}
+                          onClick={() => {
+                            if (rt.isPopular) {
+                              setPopularNotice(true);
+                              setTimeout(() => setPopularNotice(false), 3000);
+                              return;
+                            }
+                            setRouteType(rt.id);
+                          }}
+                          style={rt.isPopular ? { cursor: 'not-allowed' } : {}}
                           className={`flex items-center gap-2 p-3 rounded-2xl transition-all duration-300 ${
-                            routeType === rt.id
+                            rt.isPopular
+                              ? 'bg-[#fef6d2]/20 text-black/40 cursor-not-allowed border border-transparent select-none'
+                              : routeType === rt.id
                               ? 'bg-brand-yellow text-black font-bold shadow-md border border-black/10'
                               : 'bg-[#fef6d2]/30 text-black/80 hover:bg-[#fef6d2]/50 font-medium border border-transparent'
                           }`}
                         >
-                          <div className={routeType === rt.id ? 'text-black' : 'text-black/60'}>{rt.icon}</div>
+                          <div className={routeType === rt.id && !rt.isPopular ? 'text-black' : 'text-black/40'}>{rt.icon}</div>
                           <span className="text-xs">{rt.label}</span>
+                          {rt.isPopular && (
+                            <span className="ml-auto text-[9px] font-bold text-red-600 bg-red-100 px-1.5 py-0.5 rounded-full uppercase tracking-wider">
+                              Soon
+                            </span>
+                          )}
                         </button>
                       ))}
                     </div>
+                    {popularNotice && (
+                      <div className="mt-2.5 flex items-center gap-2 bg-red-100/90 text-red-800 text-xs font-semibold p-2.5 rounded-xl border border-red-200 shadow-sm animate-fade-in">
+                        <AlertTriangle size={14} className="shrink-0 text-red-600" />
+                        <span>Available soon</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* ── Route error ──────────────────────────────────────────── */}

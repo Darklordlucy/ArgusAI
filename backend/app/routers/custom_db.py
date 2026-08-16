@@ -1,5 +1,6 @@
 import json
 import logging
+import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -237,3 +238,44 @@ async def get_heavy_traffic():
                 }
             ]
         }
+
+
+@router.get("/iot_readings")
+async def get_iot_readings(db: AsyncSession = Depends(get_db)):
+    """Fetch IoT sensor readings from database and return as GeoJSON FeatureCollection."""
+    try:
+        query = text("""
+            SELECT id, device_id, latitude, longitude, accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z, timestamp 
+            FROM iot_readings 
+            ORDER BY timestamp DESC 
+            LIMIT 1000;
+        """)
+        result = await db.execute(query)
+        rows = result.fetchall()
+        features = []
+        for rid, dev_id, lat, lon, ax, ay, az, gx, gy, gz, ts in rows:
+            if lat is None or lon is None:
+                continue
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [float(lon), float(lat)]
+                },
+                "properties": {
+                    "id": rid,
+                    "device_id": dev_id or "SENSOR-DEVICE",
+                    "accel_x": float(ax or 0.0),
+                    "accel_y": float(ay or 0.0),
+                    "accel_z": float(az or 9.81),
+                    "gyro_x": float(gx or 0.0),
+                    "gyro_y": float(gy or 0.0),
+                    "gyro_z": float(gz or 0.0),
+                    "timestamp": ts.isoformat() if ts else None
+                }
+            })
+        return {"type": "FeatureCollection", "features": features}
+    except Exception as e:
+        logger.warning(f"Database query error for iot_readings: {e}")
+        return {"type": "FeatureCollection", "features": []}
+

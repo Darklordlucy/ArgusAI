@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import Navbar from '../components/Navbar';
 import Map, { NavigationControl, Source, Layer, Popup } from 'react-map-gl/mapbox';
-import { Layers, AlertTriangle, Car, Siren, Loader2, Star, Cloud } from 'lucide-react';
-import { fetchHazards, fetchPopularPlaces, fetchWeatherGrid, fetchHeavyTraffic, fetchSosAlerts } from '../services/api';
+import { Layers, AlertTriangle, Car, Siren, Loader2, Star, Cpu } from 'lucide-react';
+import { fetchHazards, fetchPopularPlaces, fetchIotReadings, fetchHeavyTraffic, fetchSosAlerts } from '../services/api';
 
 // Colour ramp by hazard score (0 → low, 1 → high)
 function hazardColor(score) {
@@ -48,101 +48,120 @@ const MMR_LANDMARKS = [
   { name: 'WEH Dahisar Check Naka', lat: 19.2500, lon: 72.8600 },
 ];
 
-const mockHazards = (() => {
-  const hazardTypes = [
-    {
-      type: 'Wet Road / Water Logging',
-      descriptions: [
-        'Water accumulation of 6-12 inches on the left lane of {name}. Slow-moving traffic reported.',
-        'Water logging at {name} underpass. Low-clearance vehicles advised to take alternate routes.'
-      ]
-    },
-    {
-      type: 'Accident Prone Zone',
-      descriptions: [
-        'High accident rate reported near {name} due to sharp turns and heavy merging.',
-        'Frequent side-swipe collisions near {name}. Keep a safe distance from heavy vehicles.'
-      ]
-    },
-    {
-      type: 'Construction Obstruction',
-      descriptions: [
-        'Ongoing metro infrastructure construction blocking 2 lanes at {name}. Narrow road passage.',
-        'Flyover construction work at {name}. Divert via secondary lanes.'
-      ]
-    },
-    {
-      type: 'Road Debris / Spill',
-      descriptions: [
-        'Reported oil/lubricant spill on {name}. High risk of vehicle skidding.',
-        'Construction debris and loose gravel on the roadway near {name}. Drive slowly.'
-      ]
-    },
-    {
-      type: 'Severe Pothole Area',
-      descriptions: [
-        'A cluster of deep potholes near {name} causing vehicle deceleration and slowdowns.',
-        'Large crater-type pothole on the right lane of {name}. Hazard cone placed.'
-      ]
-    }
-  ];
-
-  const features = [];
-  for (let i = 0; i < 40; i++) {
-    const landmark = MMR_LANDMARKS[i % MMR_LANDMARKS.length];
-    const lat = landmark.lat + (Math.random() - 0.5) * 0.003;
-    const lon = landmark.lon + (Math.random() - 0.5) * 0.003;
-    const hazardInfo = hazardTypes[Math.floor(Math.random() * hazardTypes.length)];
-    const description = hazardInfo.descriptions[Math.floor(Math.random() * hazardInfo.descriptions.length)].replace('{name}', landmark.name);
-    const score = 0.35 + Math.random() * 0.63;
-
-    features.push({
-      type: 'Feature',
-      geometry: { type: 'Point', coordinates: [lon, lat] },
-      properties: {
-        id: `mock-hazard-${i}`,
-        hazard_score: parseFloat(score.toFixed(2)),
-        hazard_type: hazardInfo.type,
-        description: description,
-        color: hazardColor(score)
-      }
-    });
-  }
-
-  return { type: 'FeatureCollection', features };
-})();
-
 const LAYERS = [
   { id: 'heavy_traffic',  label: 'Heavy Zones Traffic', icon: <Car size={18} /> },
   { id: 'popular_places', label: 'Popular Places',      icon: <Star size={18} /> },
   { id: 'hazards',        label: 'Hazards',             icon: <Siren size={18} /> },
   { id: 'crashes',        label: 'Crash / SOS Alerts',  icon: <AlertTriangle size={18} className="text-red-500" /> },
-  { id: 'weather_grid',   label: 'Weather Grid',        icon: <Cloud size={18} /> },
+  { id: 'iot_readings',   label: 'IoT Readings Data',   icon: <Cpu size={18} className="text-purple-600" /> },
 ];
 
 const Maps = () => {
   const [activeLayer, setActiveLayer]     = useState('hazards');
   const [selectedItem, setSelectedItem]   = useState(null);
   const [popularPlaces, setPopularPlaces] = useState(null);
-  const [weatherGrid, setWeatherGrid]     = useState(null);
+  const [iotReadings, setIotReadings]     = useState(null);
   const [heavyTraffic, setHeavyTraffic]   = useState(null);
   const [sosAlerts, setSosAlerts]         = useState([]);
+  const [dbHazards, setDbHazards]         = useState([]);
   const [loading, setLoading]             = useState(false);
   const [error, setError]                 = useState(null);
   const mapRef = useRef(null);
 
-  const loadWeatherGrid = useCallback(async () => {
+  const loadHazards = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchWeatherGrid();
-      setWeatherGrid(data);
+      const data = await fetchHazards();
+      const list = data?.hazards || [];
+      setDbHazards(list);
     } catch (err) {
-      console.warn('Weather grid fetch warning:', err);
+      console.warn('Backend hazards query error:', err);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // Real-time live polling for segment hazards from database
+  useEffect(() => {
+    if (activeLayer !== 'hazards') return;
+
+    loadHazards();
+
+    const intervalId = setInterval(async () => {
+      try {
+        const data = await fetchHazards();
+        const list = data?.hazards || [];
+        setDbHazards(list);
+      } catch (err) {
+        console.warn('Real-time hazards polling warning:', err);
+      }
+    }, 2500);
+
+    return () => clearInterval(intervalId);
+  }, [activeLayer, loadHazards]);
+
+  const hazardsGeoJSON = useMemo(() => {
+    return {
+      type: 'FeatureCollection',
+      features: dbHazards.map((h) => {
+        const score = typeof h.hazard_score === 'number' ? h.hazard_score : parseFloat(h.hazard_score || 0.5);
+        return {
+          type: 'Feature',
+          geometry: {
+            type: 'Point',
+            coordinates: [h.longitude, h.latitude]
+          },
+          properties: {
+            id: h.id,
+            hazard_score: score.toFixed(2),
+            hazard_type: h.hazard_type || 'pothole',
+            color: hazardColor(score)
+          }
+        };
+      })
+    };
+  }, [dbHazards]);
+
+  const loadIotReadings = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchIotReadings();
+      setIotReadings(data);
+
+      if (data?.features?.length > 0 && mapRef.current) {
+        const firstCoord = data.features[0].geometry?.coordinates;
+        if (firstCoord) {
+          mapRef.current.flyTo({
+            center: [firstCoord[0], firstCoord[1]],
+            zoom: 11,
+            duration: 1500
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('IoT readings fetch warning:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Real-time live polling for IoT sensor readings from database
+  useEffect(() => {
+    if (activeLayer !== 'iot_readings') return;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const data = await fetchIotReadings();
+        setIotReadings(data);
+      } catch (err) {
+        console.warn('Real-time IoT polling warning:', err);
+      }
+    }, 2500);
+
+    return () => clearInterval(intervalId);
+  }, [activeLayer]);
 
   const loadSosAlerts = useCallback(async () => {
     setLoading(true);
@@ -182,7 +201,7 @@ const Maps = () => {
 
   const onMapClick = useCallback((event) => {
     const feature = event.features && event.features[0];
-    if (feature && (feature.layer.id === 'hazards-circles' || feature.layer.id === 'crashes-circles' || feature.layer.id === 'heavy-traffic-points')) {
+    if (feature && (feature.layer.id === 'hazards-circles' || feature.layer.id === 'crashes-circles' || feature.layer.id === 'heavy-traffic-points' || feature.layer.id === 'iot-readings-circles')) {
       setSelectedItem({
         longitude: event.lngLat.lng,
         latitude: event.lngLat.lat,
@@ -215,14 +234,16 @@ const Maps = () => {
       } finally {
         setLoading(false);
       }
-    } else if (layerId === 'weather_grid') {
-      loadWeatherGrid();
+    } else if (layerId === 'hazards') {
+      loadHazards();
+    } else if (layerId === 'iot_readings') {
+      loadIotReadings();
     } else if (layerId === 'heavy_traffic') {
       loadHeavyTraffic();
     } else if (layerId === 'crashes') {
       loadSosAlerts();
     }
-  }, [popularPlaces, weatherGrid, heavyTraffic, loadWeatherGrid, loadHeavyTraffic, loadSosAlerts]);
+  }, [popularPlaces, iotReadings, heavyTraffic, loadHazards, loadIotReadings, loadHeavyTraffic, loadSosAlerts]);
 
   const crashGeoJSON = {
     type: 'FeatureCollection',
@@ -350,28 +371,44 @@ const Maps = () => {
             </Source>
           )}
 
-          {/* 2. Weather Grid Layer WITH TEMPERATURE (°C) & WEATHER CONDITION NUMBERS */}
-          {activeLayer === 'weather_grid' && weatherGrid && (
-            <Source id="weather-grid" type="geojson" data={weatherGrid}>
+          {/* 2. IoT Readings Data Layer */}
+          {activeLayer === 'iot_readings' && iotReadings && (
+            <Source id="iot-readings" type="geojson" data={iotReadings}>
               <Layer
-                id="weather-grid-fills"
-                type="fill"
+                id="iot-readings-circles"
+                type="circle"
                 paint={{
-                  'fill-color': '#3B82F6',
-                  'fill-opacity': 0.35,
-                  'fill-outline-color': '#1E3A8A'
+                  'circle-color': [
+                    'step',
+                    ['to-number', ['get', 'accel_z'], 9.81],
+                    '#8B5CF6', 12.0,
+                    '#EC4899', 15.0,
+                    '#EF4444'
+                  ],
+                  'circle-radius': [
+                    'interpolate',
+                    ['linear'],
+                    ['to-number', ['get', 'accel_z'], 9.81],
+                    9.81, 7,
+                    15.0, 12,
+                    20.0, 16
+                  ],
+                  'circle-opacity': 0.85,
+                  'circle-stroke-width': 2,
+                  'circle-stroke-color': '#FFFFFF'
                 }}
               />
               <Layer
-                id="weather-grid-labels"
+                id="iot-readings-labels"
                 type="symbol"
                 layout={{
-                  'text-field': ['concat', ['to-string', ['get', 'temperature']], '°C\n', ['get', 'weather_condition']],
-                  'text-size': 11,
-                  'text-anchor': 'center',
+                  'text-field': ['concat', ['to-string', ['coalesce', ['get', 'device_id'], 'IOT-DEV']], '\nZ: ', ['to-string', ['coalesce', ['get', 'accel_z'], 9.81]], ' m/s²'],
+                  'text-size': 10,
+                  'text-offset': [0, 1.8],
+                  'text-anchor': 'top',
                 }}
                 paint={{
-                  'text-color': '#0F172A',
+                  'text-color': '#4C1D95',
                   'text-halo-color': '#FFFFFF',
                   'text-halo-width': 2,
                 }}
@@ -454,7 +491,7 @@ const Maps = () => {
 
           {/* 5. Hazards Point Layer WITH SEVERITY SCORE NUMBERS & HAZARD TYPE LABELS */}
           {activeLayer === 'hazards' && (
-            <Source id="hazards-source" type="geojson" data={mockHazards}>
+            <Source id="hazards-source" type="geojson" data={hazardsGeoJSON}>
               <Layer
                 id="hazards-circles"
                 type="circle"
@@ -529,14 +566,21 @@ const Maps = () => {
                 </p>
               </>
             )}
-            {activeLayer === 'weather_grid' && (
+            {activeLayer === 'iot_readings' && (
               <>
-                <div className="flex justify-between text-[11px] font-bold text-black/60 uppercase tracking-widest">
-                  <span>Weather cells loaded</span>
-                  <span>{weatherGrid?.features?.length || 28}</span>
+                <div className="flex items-center justify-between text-[11px] font-bold text-black/60 uppercase tracking-widest">
+                  <span>IoT Sensor Readings Loaded</span>
+                  <span className="text-purple-700 font-extrabold">{iotReadings?.features?.length || 0}</span>
+                </div>
+                <div className="flex items-center gap-2 bg-black text-white p-2.5 rounded-xl text-xs font-bold shadow-md border border-white/10">
+                  <span className="relative flex h-2.5 w-2.5 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+                  </span>
+                  <span className="text-white">Real-time DB Sync Active (2.5s)</span>
                 </div>
                 <p className="text-xs text-black/80 leading-relaxed font-semibold">
-                  Visualizing real-time precipitation, temperature (°C), and weather conditions.
+                  Visualizing live IoT sensor telemetry records fetched directly from the database in real-time.
                 </p>
               </>
             )}
@@ -550,12 +594,19 @@ const Maps = () => {
             )}
             {activeLayer === 'hazards' && (
               <>
-                <div className="flex justify-between text-[11px] font-bold text-black/60 uppercase tracking-widest">
-                  <span>Hazards loaded</span>
-                  <span>{mockHazards.features.length}</span>
+                <div className="flex items-center justify-between text-[11px] font-bold text-black/60 uppercase tracking-widest">
+                  <span>Segment Hazards Loaded</span>
+                  <span className="text-red-700 font-extrabold">{dbHazards.length}</span>
+                </div>
+                <div className="flex items-center gap-2 bg-black text-white p-2.5 rounded-xl text-xs font-bold shadow-md border border-white/10">
+                  <span className="relative flex h-2.5 w-2.5 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                  </span>
+                  <span className="text-white">Real-time DB Hazards Active (2.5s)</span>
                 </div>
                 <p className="text-xs text-black/80 leading-relaxed font-semibold">
-                  Displaying numerical hazard severity scores (0.00 to 1.00) on map markers.
+                  Displaying real-time segment hazard scores (0.00 to 1.00) fetched directly from database.
                 </p>
               </>
             )}

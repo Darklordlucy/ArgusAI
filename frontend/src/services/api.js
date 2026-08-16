@@ -20,14 +20,31 @@ async function request(path, options = {}) {
 
 // ─── Hazards ────────────────────────────────────────────────────────────────
 
-export async function fetchHazards({ minLat, minLon, maxLat, maxLon }) {
+export async function fetchHazards(bounds = {}) {
+  const minLat = bounds.minLat !== undefined ? bounds.minLat : 0.0;
+  const minLon = bounds.minLon !== undefined ? bounds.minLon : 0.0;
+  const maxLat = bounds.maxLat !== undefined ? bounds.maxLat : 90.0;
+  const maxLon = bounds.maxLon !== undefined ? bounds.maxLon : 180.0;
+
   const params = new URLSearchParams({
     min_lat: minLat,
     min_lon: minLon,
     max_lat: maxLat,
     max_lon: maxLon,
   });
-  return request(`/api/v1/routes/hazards?${params}`);
+
+  try {
+    const data = await request(`/api/v1/routes/hazards?${params}`);
+    if (data && Array.isArray(data.hazards) && data.hazards.length > 0) return data;
+  } catch (e) {}
+
+  try {
+    const res = await fetch(`https://darklord11-asphr-backend.hf.space/api/v1/routes/hazards?${params}`);
+    const data = await res.json();
+    if (data && Array.isArray(data.hazards)) return data;
+  } catch (err) {}
+
+  return { hazards: [] };
 }
 
 // ─── Geocoding ───────────────────────────────────────────────────────────────
@@ -58,10 +75,19 @@ export async function computeRoute({
 }
 
 export async function submitRouteFeedback(payload) {
-  return request('/api/v1/routes/feedback', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+  try {
+    return await request('/api/v1/routes/feedback', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    const res = await fetch('https://darklord11-asphr-backend.hf.space/api/v1/routes/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return res.json();
+  }
 }
 
 // ─── Health ──────────────────────────────────────────────────────────────────
@@ -81,6 +107,21 @@ export async function fetchPopularPlaces() {
     const res = await fetch('https://darklord11-asphr-backend.hf.space/api/v1/custom-db/popular_places');
     return res.json();
   }
+}
+
+export async function fetchIotReadings() {
+  try {
+    const data = await request('/api/v1/custom-db/iot_readings');
+    if (data && Array.isArray(data.features) && data.features.length > 0) return data;
+  } catch (e) {}
+
+  try {
+    const res = await fetch('https://darklord11-asphr-backend.hf.space/api/v1/custom-db/iot_readings');
+    const data = await res.json();
+    if (data && Array.isArray(data.features)) return data;
+  } catch (err) {}
+
+  return { type: 'FeatureCollection', features: [] };
 }
 
 export async function fetchWeatherGrid() {

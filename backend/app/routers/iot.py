@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.config import get_db
-from app.models.db_models import SOSAlert, IoTReading
+from app.models.db_models import SOSAlert, IoTReading, SegmentHazard
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ async def iot_placeholder():
     return {
         "status": "online",
         "service": "IoT Ingestion Router",
-        "endpoints": ["POST /api/v1/iot/sos", "POST /api/v1/iot/telemetry"]
+        "endpoints": ["POST /api/v1/iot/sos", "POST /api/v1/iot/telemetry", "POST /api/v1/iot/hazards"]
     }
 
 
@@ -202,3 +202,93 @@ async def upload_telemetry(request: Request, db: AsyncSession = Depends(get_db))
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to record telemetry: {str(e)}"
         )
+
+
+# POST /api/v1/iot/hazards (Inserts into segment_hazards table)
+@router.post("/hazards", status_code=status.HTTP_201_CREATED)
+async def create_segment_hazard(request: Request, db: AsyncSession = Depends(get_db)):
+    """
+    Ingest road segment hazard scores into the segment_hazards database table.
+    Accepts JSON body with latitude, longitude, hazard_score (0.0 - 1.0), hazard_type, confidence, source, and optional expires_at.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    latitude = body.get("latitude") if body.get("latitude") is not None else body.get("lat")
+    longitude = body.get("longitude") if body.get("longitude") is not None else (body.get("longitude") or body.get("lon") or body.get("lng"))
+    hazard_score = body.get("hazard_score") if body.get("hazard_score") is not None else (body.get("score") or body.get("hazardScore"))
+
+    if latitude is None or longitude is None or hazard_score is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing required parameters. Please provide 'latitude', 'longitude', and 'hazard_score' (between 0.0 and 1.0)."
+        )
+
+    try:
+        latitude = float(latitude)
+        longitude = float(longitude)
+        hazard_score = float(hazard_score)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="'latitude', 'longitude', and 'hazard_score' must be valid numeric floating-point numbers."
+        )
+
+    # Clamp hazard_score to [0.0, 1.0] to satisfy DB constraint
+    hazard_score = max(0.0, min(1.0, hazard_score))
+
+    hazard_type = str(body.get("hazard_type") or body.get("type") or "pothole")
+    confidence = float(body.get("confidence", 0.90)) if body.get("confidence") is not None else 0.90
+    source = str(body.get("source") or "iot")
+
+    expires_at_val = body.get("expires_at")
+    expires_at = None
+    if expires_at_val:
+        try:
+            if isinstance(expires_at_val, str):
+                expires_at = datetime.datetime.fromisoformat(expires_at_val.replace("Z", "+00:00"))
+        except Exception:
+            expires_at = None
+
+    try:
+        hazard = SegmentHazard(
+            latitude=latitude,
+            longitude=longitude,
+            hazard_score=hazard_score,
+            hazard_type=hazard_type,
+            confidence=confidence,
+            source=source,
+            recorded_at=datetime.datetime.utcnow(),
+            expires_at=expires_at
+        )
+        db.add(hazard)
+        await db.commit()
+        await db.refresh(hazard)
+
+        logger.info(f"Successfully recorded SegmentHazard #{hazard.id} at ({latitude}, {longitude}) score={hazard_score}")
+
+        return {
+            "status": "success",
+            "message": "Hazard score recorded in segment_hazards table successfully.",
+            "hazard": {
+                "id": hazard.id,
+                "latitude": hazard.latitude,
+                "longitude": hazard.longitude,
+                "hazard_score": hazard.hazard_score,
+                "hazard_type": hazard.hazard_type,
+                "confidence": hazard.confidence,
+                "source": hazard.source,
+                "recorded_at": hazard.recorded_at.isoformat() if hazard.recorded_at else None,
+                "expires_at": hazard.expires_at.isoformat() if hazard.expires_at else None
+            }
+        }
+    except Exception as e:
+        await db.rollback()
+        logger.error(f"Database insertion failure in POST /hazards: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to record hazard in database: {str(e)}"
+        )
+

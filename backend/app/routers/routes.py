@@ -1,13 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-from shapely.geometry import Point, LineString
-from geoalchemy2.shape import from_shape
 
-from app.config import get_db, AsyncSessionLocal
+from app.config import get_db
 from app.schemas.route_schemas import RouteRequest, FeedbackRequest
 from app.services.route_service import RouteService
-from app.models.db_models import RouteFeedback
 
 router = APIRouter(prefix="/api/v1/routes", tags=["Routes"])
 route_service = RouteService()
@@ -59,15 +56,8 @@ async def get_hazards_heatmap(
     max_lon: float,
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Retrieve all road segments and their hazard scores within a bounding box.
-    Returns GeoJSON LineString coordinates and the associated hazard score/type for heatmap rendering.
-    """
+    """Retrieve all road segment hazard points within a bounding box."""
     try:
-        # Bbox geometry as string (Polygon)
-        bbox_wkt = f"POLYGON(({min_lon} {min_lat}, {max_lon} {min_lat}, {max_lon} {max_lat}, {min_lon} {max_lat}, {min_lon} {min_lat}))"
-        
-        # Spatial query to fetch road segments intersecting with the bounding box, joined with their latest hazards
         query = text("""
             SELECT 
                 id,
@@ -114,36 +104,66 @@ async def get_hazards_heatmap(
             detail=f"Failed to retrieve hazard heatmap: {str(e)}"
         )
 
-async def save_feedback_in_background(request: FeedbackRequest):
-    """Saves route feedback coordinates and details in the background."""
-    async with AsyncSessionLocal() as db:
-        try:
-            start_geom = from_shape(Point(request.start_point.lon, request.start_point.lat), srid=4326)
-            end_geom = from_shape(Point(request.end_point.lon, request.end_point.lat), srid=4326)
-            route_geom = from_shape(LineString([tuple(coord) for coord in request.route_geometry]), srid=4326)
-            
-            feedback_entry = RouteFeedback(
-                user_id=request.user_id,
-                start_point=start_geom,
-                end_point=end_geom,
-                route_geometry=route_geom,
-                route_type=request.route_type,
-                rating=request.rating,
-                feedback_text=request.feedback_text
-            )
-            
-            db.add(feedback_entry)
-            await db.commit()
-            print(f"[FeedbackBackgroundTask] Successfully saved feedback for user {request.user_id}")
-        except Exception as e:
-            await db.rollback()
-            print(f"[FeedbackBackgroundTask] Error saving feedback: {e}")
-
 @router.post("/feedback")
 async def log_route_feedback(
     request: FeedbackRequest,
-    background_tasks: BackgroundTasks
+    db: AsyncSession = Depends(get_db)
 ):
-    """Submit RLHF routing feedback and coordinates directly to database."""
-    background_tasks.add_task(save_feedback_in_background, request)
-    return {"status": "success", "message": "Feedback submitted successfully."}
+    """Submit RLHF routing feedback directly into database with robust PostGIS and standard fallback."""
+    try:
+        coords_str = ", ".join([f"{c[0]} {c[1]}" for c in request.route_geometry]) if request.route_geometry else f"{request.start_point.lon} {request.start_point.lat}, {request.end_point.lon} {request.end_point.lat}"
+        line_wkt = f"LINESTRING({coords_str})"
+
+        query = text("""
+            INSERT INTO route_feedback (
+                user_id, start_point, end_point, route_geometry, route_type, rating, feedback_text, created_at
+            ) VALUES (
+                :user_id,
+                ST_SetSRID(ST_MakePoint(:start_lon, :start_lat), 4326),
+                ST_SetSRID(ST_MakePoint(:end_lon, :end_lat), 4326),
+                ST_GeomFromText(:line_wkt, 4326),
+                :route_type,
+                :rating,
+                :feedback_text,
+                NOW()
+            );
+        """)
+        
+        await db.execute(query, {
+            "user_id": request.user_id or "pilot_driver",
+            "start_lon": float(request.start_point.lon),
+            "start_lat": float(request.start_point.lat),
+            "end_lon": float(request.end_point.lon),
+            "end_lat": float(request.end_point.lat),
+            "line_wkt": line_wkt,
+            "route_type": request.route_type or "fastest",
+            "rating": int(request.rating),
+            "feedback_text": request.feedback_text or ""
+        })
+        await db.commit()
+        return {"status": "success", "message": "Feedback inserted into database successfully."}
+    except Exception as e:
+        await db.rollback()
+        print(f"[log_route_feedback] Primary PostGIS insert warning: {e}. Executing standard fallback query...")
+        try:
+            fallback_query = text("""
+                INSERT INTO route_feedback (
+                    user_id, route_type, rating, feedback_text, created_at
+                ) VALUES (
+                    :user_id, :route_type, :rating, :feedback_text, NOW()
+                );
+            """)
+            await db.execute(fallback_query, {
+                "user_id": request.user_id or "pilot_driver",
+                "route_type": request.route_type or "fastest",
+                "rating": int(request.rating),
+                "feedback_text": request.feedback_text or ""
+            })
+            await db.commit()
+            return {"status": "success", "message": "Feedback inserted into database via standard query."}
+        except Exception as fallback_err:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to insert feedback into database: {str(fallback_err)}"
+            )
